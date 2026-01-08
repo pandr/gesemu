@@ -1,0 +1,40 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Emulator",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/ges",
+            "args": ["-b", "${workspaceFolder}/roms/dmg_boot.bin"],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "build debug"
+        },
+        {
+            "name": "Debug Emulator cputest",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/ges",
+            "args": ["${workspaceFolder}/roms/cpu_instrs/individual/10-bit ops.gb"],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "build debug"
+        },
+        {
+            "name": "Debug Emulator with ROM",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/bin/ges",
+            "args": ["${input:romPath}"],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "build debug"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "romPath",
+            "type": "promptString",
+            "description": "Path to ROM file",
+            "default": "roms/"
+        }
+    ]
+}

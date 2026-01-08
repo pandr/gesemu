@@ -1,0 +1,35 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build",
+            "type": "shell",
+            "command": "make",
+            "args": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$gcc"],
+            "detail": "Build the project using make"
+        },
+        {
+            "label": "build debug",
+            "type": "shell",
+            "command": "make",
+            "args": ["debug"],
+            "group": "build",
+            "problemMatcher": ["$gcc"],
+            "detail": "Build the project with debug symbols (no optimization)"
+        },
+        {
+            "label": "clean",
+            "type": "shell",
+            "command": "make",
+            "args": ["clean"],
+            "group": "build",
+            "problemMatcher": [],
+            "detail": "Clean build artifacts"
+        }
+    ]
+}
