@@ -68,6 +68,11 @@ uint8_t& REG_NR11  = map[0xFF11];
 uint8_t& REG_NR12  = map[0xFF12];
 uint8_t& REG_NR13  = map[0xFF13];
 uint8_t& REG_NR14  = map[0xFF14];
+uint8_t& REG_NR30  = map[0xFF1A];
+uint8_t& REG_NR31  = map[0xFF1B];
+uint8_t& REG_NR32  = map[0xFF1C];
+uint8_t& REG_NR33  = map[0xFF1D];
+uint8_t& REG_NR34  = map[0xFF1E];
 uint8_t& REG_NR51  = map[0xFF25];
 uint8_t& REG_NR52  = map[0xFF26];
 uint8_t& REG_STAT  = map[0xFF41];
@@ -79,8 +84,7 @@ uint8_t& REG_IE    = map[0xFFFF];
 
 // Timers
 uint16_t sys_counter = 0; // System counter for timers
-uint16_t tima_timer = 0; // Running at frequency set in TAC
-uint16_t tima_timer_reload = 1024; // Default 4096 Hz
+uint16_t tima_timer_cycles = 0;
 uint8_t div_apu = 0;     // Running at 512 Hz
 uint16_t serial_timer = 0; // Serial transfer timer
 
@@ -223,6 +227,7 @@ void write(uint16_t addr, uint8_t value)
         else if(addr == 0xFF04) {
             // DIV register reset
             sys_counter = 0;
+            tima_timer_cycles = 0;
             map[addr] = 0;
         }
         else if(addr == 0xFF05) {
@@ -235,18 +240,17 @@ void write(uint16_t addr, uint8_t value)
         }
         else if(addr == 0xFF07) {
             printf("TAC: %02x\n", value);
+            value |= 0xF8;
             map[addr] = value;
-            uint8_t freq = value & 0x3;
-            switch(freq) {
-                case 0: tima_timer_reload = 1024; break; // 4096 Hz
-                case 1: tima_timer_reload = 16;   break; // 262144 Hz
-                case 2: tima_timer_reload = 64;   break; // 65536 Hz
-                case 3: tima_timer_reload = 256;  break; // 16384 Hz
-            }
         }
         else if(addr == 0xFF26) {
             printf("Turning sound %s. %02x\n", value&0x80 ? "On": "Off", value);
             map[addr] = (map[addr] & 0x7F) | (value&0x80);
+        }
+        else if(addr == 0xFF41) {
+            printf("STAT: %02x\n", value);
+            value |= 0x80;
+            map[addr] = value;
         }
         else if (addr == 0xFF0F) {
             printf("IF: %02x\n", value);
@@ -255,6 +259,7 @@ void write(uint16_t addr, uint8_t value)
         }
         else if (addr == 0xFF10) {
             printf("Sound sweep %02x\n", value);
+            value |= 0x80;
             map[addr] = value;
         }
         else if (addr == 0xFF11) {
@@ -278,6 +283,7 @@ void write(uint16_t addr, uint8_t value)
         }
         else if (addr == 0xFF14) {
             printf("Soundperiod-high %02x\n", value);
+            value |= 0x38;
             map[addr] = value;
             if(value & 0x80) {
                 printf("  -> Triggering sound on chan 1\n");
@@ -293,6 +299,47 @@ void write(uint16_t addr, uint8_t value)
                 sound_ch1_frq_sweep_timer = 0;
                 sound_ch1_frq_sweep_enabled = REG_NR10 & 0x77;
             }
+        }
+        else if (addr == 0xFF1A) {
+            printf("NR30 Sound on/off %02x\n", value);
+            value |= 0x7F;
+            map[addr] = value;
+        }
+        else if (addr == 0xFF1B) {
+            printf("NR31 Sound length %02x\n", value);
+            map[addr] = value;
+        }
+        else if (addr == 0xFF1C) {
+            printf("NR32 Sound volume %02x\n", value);
+            value |= 0x9F;
+            map[addr] = value;
+        }
+        else if (addr == 0xFF1D) {
+            printf("NR33 Sound period low %02x\n", value);
+            map[addr] = value;
+        }
+        else if (addr == 0xFF1E) {
+            printf("Sound period high %02x\n", value);
+            value |= 0x34;
+            map[addr] = value;
+        }
+        else if (addr == 0xFF20) {
+            printf("NR41 Sound length %02x\n", value);
+            value |= 0xC0;
+            map[addr] = value;
+        }
+        else if (addr == 0xFF21) {
+            printf("NR42 Sound envelope %02x\n", value);
+            map[addr] = value;
+        }
+        else if (addr == 0xFF22) {
+            printf("NR43 Sound polynomial %02x\n", value);
+            map[addr] = value;
+        }
+        else if (addr == 0xFF23) {
+            printf("NR44 Sound period high %02x\n", value);
+            value |= 0x3F;
+            map[addr] = value;
         }
         else if (addr == 0xFF24) {
             printf("Master & vin: %02x\n", value);
@@ -340,7 +387,7 @@ void write(uint16_t addr, uint8_t value)
     else if (addr >= 0xFF80) {
         if(addr == 0xFFFF) {
             printf("IE: %02x\n", value);
-            value |= 0xE0;
+            //value |= 0xE0;
         }
         map[addr] = value;
     }
@@ -392,6 +439,23 @@ uint8_t read(uint16_t addr)
 const int OP_T_STATES[] = {
 
 //   0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+        4,12, 8, 8, 4, 4, 8, 4,20, 8, 8, 8, 4, 4, 8, 4, /* 0x00 */
+        4,12, 8, 8, 4, 4, 8, 4,12, 8, 8, 8, 4, 4, 8, 4, /* 0x10 */
+        8,12, 8, 8, 4, 4, 8, 4, 8, 8, 8, 8, 4, 4, 8, 4, /* 0x20 */
+        8,12, 8, 8,12,12,12, 4, 8, 8, 8, 8, 4, 4, 8, 4, /* 0x30 */
+        4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 8, 4, /* 0x40 */
+        4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 8, 4, /* 0x50 */
+        4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 8, 4, /* 0x60 */
+        8, 8, 8, 8, 8, 8, 4, 8, 4, 4, 4, 4, 4, 4, 8, 4, /* 0x70 */
+        4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 8, 4, /* 0x80 */
+        4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 8, 4, /* 0x90 */
+        4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 8, 4, /* 0xA0 */
+        4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 8, 4, /* 0xB0 */
+        8,12,12,16,12,16, 8,16, 8,16,12, 8,12,24, 8,16, /* 0xC0 */
+        8,12,12, 0,12,16, 8,16, 8,16,12, 0,12, 0, 8,16, /* 0xD0 */
+        12,12,8, 0, 0,16, 8,16,16, 4,16, 0, 0, 0, 8,16, /* 0xE0 */
+        12,12,8, 4, 0,16, 8,16,12, 8,16, 4, 0, 0, 8,16  /* 0xF0 */
+        /*
      4,12, 8, 8, 4, 4, 8, 4,20, 8, 8, 8, 4, 4, 8, 4,    // 0x00
      4,12, 8, 8, 4, 4, 8, 4, 8, 8, 8, 8, 4, 4, 8, 4,    // 0x10
      8,12, 8, 8, 4, 4, 8, 4, 8, 8, 8, 8, 4, 4, 8, 4,    // 0x20
@@ -408,6 +472,7 @@ const int OP_T_STATES[] = {
      8,12,12, 0,12,16, 8,32, 8, 8,12, 0,12, 0, 8,32,    // 0xD0
     12,12, 8, 0, 0,16, 8,32,16, 4,16, 0, 0, 0, 8,32,    // 0xE0
     12,12, 8, 4, 0,16, 8,32,12, 8,16, 4, 0, 0, 8,32     // 0xF0
+    */
 
 };
 
@@ -439,14 +504,20 @@ void audio_callback(void* /*userdata*/, Uint8* stream, int len)
     }
 }
 
-static uint16_t break_at = 0;
+uint16_t disassemble = 0;
+#define OPCODE(x) {if(disassemble>0){disassemble--; printf("(%04x) %04x: %02x %s\n", sys_counter, PC-1, op, x);}}
+
+static uint16_t break_at = 0xFFFF;
 int cpu_tick()
 {
     if(ime_true_pending > 0) {
-        if(--ime_true_pending == 0)
+        printf("IME pending\n");
+        if(--ime_true_pending == 0) {
             ime = true;
+            printf("IME set to true\n");
+        }
     }
-    bool irequested = REG_IE & REG_IF;
+    bool irequested = REG_IE & REG_IF & 0x1F;
     if(irequested)
     {
         // Wake up from halt on any interrupt request
@@ -458,6 +529,7 @@ int cpu_tick()
     if(PC == break_at)
     {
         printf("Reached %04x\n", PC);
+        disassemble=100;
     }
 
     int cycles = 0;
@@ -465,8 +537,9 @@ int cpu_tick()
     if(ime && irequested) {
         for(int i = 0; i < 5; i++) {
             if( (REG_IF & REG_IE) & (1<<i) ) {
-                printf("Handling interrupt %i\n", i);
+                printf("Handling interrupt %i. PC=%04x\n", i, PC);
                 ime = false;
+                printf("IME set to false\n");
                 REG_IF &= ~(1<<i);
                 write(--SP, (PC>>8)&0xFF);
                 write(--SP, PC&0xFF);
@@ -483,29 +556,29 @@ int cpu_tick()
     PC++;
 
     if(op == 0x00) {
-        // NOP
+        OPCODE("NOP");
     }
     else if ((op & 0xCF) == 0x1) {
-        // LD r16, imm16
+        OPCODE("LD r16, imm16");
         *R16[(op&0x30)>>4] = read(PC) + (read(PC+1)<<8);
         PC+=2;
     }
     else if ((op & 0xCF) == 0x2) {
-        // LD [r16mem], a
+        OPCODE("LD [r16mem], a");
         uint16_t *reg = R16mem[(op&0x30)>>4];
         write(*reg, A);
         if((op&0x30) == 0x20) HL++;
         else if ((op&0x30) == 0x30) HL--;
     }
     else if ((op & 0xCF) == 0xA) {
-        // LD a, [r16mem]
+        OPCODE("LD a, [r16mem]");
         uint16_t *reg = R16mem[(op&0x30)>>4];
         A = read(*reg);
         if((op&0x30) == 0x20) HL++;
         else if ((op&0x30) == 0x30) HL--;
     }
     else if (op == 0x08) {
-        // LD [imm16], sp
+        OPCODE("LD [imm16], sp");
         uint16_t addr = read(PC);
         addr |= read(PC+1)<<8;
         PC+=2;
@@ -513,12 +586,12 @@ int cpu_tick()
         write(addr+1, SP >> 8);
     }
     else if (op == 0xC9) {
-        // RET
+        OPCODE("RET");
         PC = read(SP++);
         PC |= read(SP++) << 8;
     }
     else if ((op & 0xE7) == 0xC0) {
-        // RET cond
+        OPCODE("RET cond");
         uint8_t cond = (op&0x18) >> 3;
         if( ((cond == 0) && !Fz) || // nz
             ((cond == 1) && Fz)  || // z
@@ -527,16 +600,18 @@ int cpu_tick()
         {
             PC = read(SP++);
             PC |= read(SP++) << 8;
+            cycles += 12;
         }
     }
     else if (op == 0xD9) {
-        // RETI
+        OPCODE("RETI");
         PC = read(SP++);
         PC |= read(SP++) << 8;
         ime = true;
+        printf("IME set to true\n");
     }
     else if ((op & 0xE7) == 0xC2) {
-        // JP cond, imm16
+        OPCODE("JP cond, imm16");
         uint8_t cond = (op&0x18) >> 3;
         uint16_t dst = read(PC++);
         dst |= read(PC++)<<8;
@@ -546,20 +621,21 @@ int cpu_tick()
             ((cond == 3) && Fc))    // c
         {
             PC = dst;
+            cycles += 4;
         }
     }
     else if (op == 0xC3) {
-        // JP imm16
+        OPCODE("JP imm16");
         uint16_t dst = read(PC++);
         dst |= read(PC++)<<8;
         PC = dst;
     }
     else if (op == 0xE9) {
-        // JP (hl)
+        OPCODE("JP (hl)");
         PC = HL;
     }
     else if ((op & 0xE7) == 0xC4) {
-        // CALL cond, imm16
+        OPCODE("CALL cond, imm16");
         uint8_t cond = (op&0x18) >> 3;
         uint16_t dst = read(PC++);
         dst |= read(PC++)<<8;
@@ -571,10 +647,11 @@ int cpu_tick()
             write(--SP, PC >> 8);
             write(--SP, PC & 0xFF);
             PC = dst;
+            cycles += 12;
         }
     }
     else if (op == 0xCD) {
-        // CALL imm16
+        OPCODE("CALL imm16");
         uint16_t dst = read(PC++);
         dst |= read(PC++)<<8;
         write(--SP, PC >> 8);
@@ -582,14 +659,14 @@ int cpu_tick()
         PC = dst;
     }
     else if ((op & 0xC7) == 0xC7) {
-        // RST n
+        OPCODE("RST n");
         uint16_t dst = (op & 0x38);
         write(--SP, PC >> 8);
         write(--SP, PC & 0xFF);
         PC = dst;
     }
     else if ((op & 0xCF) == 0xC1) {
-        // POP r16
+        OPCODE("POP r16");
         uint16_t* r = R16stk[(op>>4)&0x3];
         *r = read(SP++);
         *r |= read(SP++) << 8;
@@ -598,18 +675,18 @@ int cpu_tick()
         }
     }
     else if ((op & 0xCF) == 0xC5) {
-        // PUSH r16
+        OPCODE("PUSH r16");
         uint16_t* r = R16stk[(op>>4)&0x3];
         write(--SP, *r >> 8);
         write(--SP, *r & 0xFF);
     }
     else if (op == 0x18) {
-        // JR
+        OPCODE("JR");
         uint8_t off = read(PC++);
         PC += (int8_t)off;
     }
     else if ((op & 0xE7) == 0x20) {
-        // JR cond
+        OPCODE("JR cond");
         uint8_t cond = (op&0x18) >> 3;
         uint8_t off = read(PC++);
         if( ((cond == 0) && !Fz) || // nz
@@ -618,10 +695,11 @@ int cpu_tick()
             ((cond == 3) && Fc))    // c
         {
             PC += (int8_t)off;
+            cycles += 4;
         }
     }
     else if ((op&0xC7) == 0x06) {
-        // LD r8, imm8
+        OPCODE("LD r8, imm8");
         uint8_t *reg = R8[op >> 3];
         if(reg)
             *reg = read(PC++);
@@ -629,11 +707,11 @@ int cpu_tick()
             write(HL, read(PC++));
     }
     else if ((op&0xC0) == 0x40) {
-        // LD r8, r8
+        OPCODE("LD r8, r8");
         if(op == 0x76) {
-            // HALT
+            OPCODE("HALT");
             printf("HALT encountered at PC=%04x\n", PC-1);
-            bool ipending = (map[0xFF0F] & map[0xFFFF]) != 0;
+            bool ipending = (map[0xFF0F] & map[0xFFFF] & 0x1F) != 0;
             if(!ime && ipending) {
                 // HALT bug occurs
                 printf("HALT bug triggered! PC set back to %04x\n", PC);
@@ -654,70 +732,70 @@ int cpu_tick()
             write(HL, v);
     }
     else if (op == 0xE2) {
-        // LDH [c], a
+        OPCODE("LDH [c], a");
         write(0xFF00+C, A);
     }    
     else if (op == 0xE0) {
-        // LDH [imm8], a
+        OPCODE("LDH [imm8], a");
         write(0xFF00+read(PC), A);
         PC++;
     }    
     else if (op == 0xEA) {
-        // LD [imm16], a
+        OPCODE("LD [imm16], a");
         write(read(PC) + (read(PC+1)<<8), A);
         PC+=2;
     }    
     else if (op == 0xE8) {
-        // ADD sp, imm8
+        OPCODE("ADD sp, imm8");
         int8_t imm = (int8_t)read(PC++);
         uint16_t newSP = SP + imm;
         F = (((SP ^ imm ^ newSP) & 0x10) ? Fh_mask : 0) | (((SP ^ imm ^ newSP) & 0x100) ? Fc_mask : 0);
         SP = newSP;
     }    
     else if (op == 0xF2) {
-        // LDH a, [c]
+        OPCODE("LDH a, [c]");
         A = read(0xFF00+C);
     }    
     else if (op == 0xF0) {
-        // LDH a, [imm8]
+        OPCODE("LDH a, [imm8]");
         A = read(0xFF00+read(PC));
         PC++;
     }    
     else if (op == 0xF8) {
-        // LD hl, sp + imm8
+        OPCODE("LD hl, sp + imm8");
         int8_t imm = (int8_t)read(PC++);
         uint16_t newHL = SP + imm;
         F = (((SP ^ imm ^ newHL) & 0x10) ? Fh_mask : 0) | (((SP ^ imm ^ newHL) & 0x100) ? Fc_mask : 0);
         HL = newHL;
     }    
     else if (op == 0xF9) {
-        // LD sp, hl
+        OPCODE("LD sp, hl");
         SP = HL;
     }    
     else if (op == 0xFA) {
-        // LD a, [imm16]
+        OPCODE("LD a, [imm16]");
         A = read(read(PC) + (read(PC+1)<<8));
         PC+=2;
     }    
     else if ((op & 0xCF) == 0x3) {
-        // INC r16
+        OPCODE("INC r16");
         uint16_t *reg = R16[op>>4];
         ++*reg;
     }
     else if ((op & 0xCF) == 0xB) {
-        // DEC r16
+        OPCODE("DEC r16");
         uint16_t *reg = R16[op>>4];
         --*reg;
     }
     else if ((op & 0xCF) == 0x9) {
-        // ADD hl, r16
+        OPCODE("ADD hl, r16");
         uint16_t *reg = R16[op>>4];
         uint32_t r = *reg + HL;
         F = (Fz?Fz_mask:0) | 0 | ((r&0xFFFF0000)?Fc_mask:0) | (((r ^ HL ^ *reg) & 0x1000) ? Fh_mask : 0);
         HL = r;
     }
     else if ((op & 0xC7) == 0x4) {
-        // INC r8
+        OPCODE("INC r8");
         uint8_t *reg = R8[op>>3];
         uint8_t v = reg ? *reg : read(HL);
         v+=1;
@@ -728,7 +806,7 @@ int cpu_tick()
             write(HL, v);
     }
     else if ((op & 0xC7) == 0x5) {
-        // DEC r8
+        OPCODE("DEC r8");
         uint8_t *reg = R8[op>>3];
         uint8_t v = reg ? *reg : read(HL);
         v-=1;
@@ -743,17 +821,22 @@ int cpu_tick()
         op = read(PC);
         //printf("Op 0xCB%02x on %04x\n", op, PC);
         PC++;
+        cycles = 8; // Base cycles for CB ops
+        // Extra cycles for (HL) ops
+        if( (op&0x7) == 0x6) {
+            cycles = (op&0xC0) == 0x40 ? 12 : 16; // 0x40-0x7F : 12 cycles, others 16 cycles
+        }
         uint8_t top = op >> 6;
         if(top) {
             uint8_t bitindex = (op & 0x38) >> 3;
             uint8_t *reg = R8[op&0x7];
             uint8_t v = reg ? *reg : read(HL);
             if(top == 1) {
-                // BIT
+                OPCODE("BIT");
                 F = (((1<<bitindex)&v) ? 0 : Fz_mask) | 0 | 0x20 | (F&Fc_mask);
             }
             else if (top == 2) {
-                // RES
+                OPCODE("RES");
                 v &= ~(1<<bitindex);
                 if (reg)
                     *reg = v;
@@ -761,7 +844,7 @@ int cpu_tick()
                     write(HL, v);
             }
             else if (top == 3) {
-                // SET
+                OPCODE("SET");
                 v |= (1<<bitindex);
                 if (reg)
                     *reg = v;
@@ -775,42 +858,42 @@ int cpu_tick()
             uint8_t top = op >> 3;
             uint8_t r = 0;
             if(top == 0x0) {
-                // RLC r8
+                OPCODE("RLC r8");
                 r = (v << 1) | (v >> 7);
                 F = (r==0?Fz_mask:0) | (v&0x80?Fc_mask:0);
             }
             else if (top == 0x1) {
-                // RRC r8
+                OPCODE("RRC r8");
                 r = (v >> 1) | (v << 7);
                 F = (r==0?Fz_mask:0) | (v&1?Fc_mask:0);
             }
             else if (top == 0x2) {
-                // RL r8
+                OPCODE("RL r8");
                 r = (v << 1) | Fc;
                 F = (r==0?Fz_mask:0) | (v&0x80?Fc_mask:0);
             }
             else if (top == 0x3) {
-                // RR r8
+                OPCODE("RR r8");
                 r = (v >> 1) | (Fc << 7);
                 F = (r==0?Fz_mask:0) | (v&1?Fc_mask:0);
             }
             else if (top == 0x4) {
-                // SLA r8
+                OPCODE("SLA r8");
                 r = (v << 1);
                 F = (r==0?Fz_mask:0) | (v&0x80?Fc_mask:0);
             }
             else if (top == 0x5) {
-                // SRA r8
+                OPCODE("SRA r8");
                 r = (v >> 1) | (v & 0x80);
                 F = (r==0?Fz_mask:0) | (v&1?Fc_mask:0);
             }
             else if (top == 0x6) {
-                // SWAP r8
+                OPCODE("SWAP r8");
                 r = (v>>4) | (v<<4);
                 F = (r==0?Fz_mask:0);
             }
             else if (top == 0x7) {
-                // SRL r8
+                OPCODE("SRL r8");
                 r = v >> 1;
                 F = (r==0?Fz_mask:0) | (v&1?Fc_mask:0);
             }
@@ -833,75 +916,75 @@ int cpu_tick()
         uint32_t o = (op&0x38)>>3;
         uint32_t r = 0;
         if(o==0x0) {
-            // ADD
+            OPCODE("ADD");
             r = A + v;
             //  Z                      N   H                         C
             F = ((r&0xFF)==0?0x80:0) | 0 | (((A ^ v ^ r)&0x10)<<1) | ((r&0xFF00)?0x10:0);
             A = r & 0xFF;
         }
         else if (o == 0x1) {
-            // ADC
+            OPCODE("ADC");
             r = A + v + Fc;
             F = ((r&0xFF)==0?0x80:0) | 0 | (((A ^ v ^ r)&0x10)<<1) | ((r&0xFF00)?0x10:0);
             A = r & 0xFF;
         }
         else if (o == 0x2) {
-            // SUB
+            OPCODE("SUB");
             r = A - v;
             F = ((r&0xFF)==0?0x80:0) | Fn_mask | (((A ^ v ^ r)&0x10)<<1) | ((r&0xFF00)?0x10:0);
             A = r & 0xFF;
         }
         else if (o == 0x3) {
-            // SBC
+            OPCODE("SBC");
             r = A - v - Fc;
             F = ((r&0xFF)==0?0x80:0) | Fn_mask | (((A ^ v ^ r)&0x10)<<1) | ((r&0xFF00)?0x10:0);
             A = r & 0xFF;
         }
         else if (o == 0x4) {
-            // AND
+            OPCODE("AND");
             A = A & v;
             F = (A==0?0x80:0) | 0 | 0x20 | 0;
         }
         else if (o == 0x5) {
-            // XOR
+            OPCODE("XOR");
             A = A ^ v;
             F = (A==0?0x80:0) | 0 | 0 | 0;
         }
         else if (o == 0x6) {
-            // OR
+            OPCODE("OR");
             A = A | v;
             F = (A==0?0x80:0) | 0 | 0 | 0;
         }
         else if (o == 0x7) {
-            // CP
+            OPCODE("CP");
             r = A - v;
             F = ((r&0xFF)==0?0x80:0) | Fn_mask | (((A ^ v ^ r)&0x10)<<1) | ((r&0xFF00)?0x10:0);
         }
     }
     else if (op == 0x07) {
-        // RLCA
+        OPCODE("RLCA");
         A = (A<<1) | (A >> 7);
         F = A&1 ? Fc_mask : 0;
     }
     else if (op == 0x0F) {
-        // RRCA
+        OPCODE("RRCA");
         A = (A >> 1) | (A << 7);
         F = A&0x80 ? Fc_mask : 0;
     }
     else if (op == 0x17) {
-        // RLA
+        OPCODE("RLA");
         uint8_t r = (A<<1) | Fc;
         F = A&0x80 ? Fc_mask : 0;
         A = r;
     }
     else if (op == 0x1F) {
-        // RRA
+        OPCODE("RRA");
         uint8_t r = (A>>1) | (Fc<<7);
         F = A&1 ? Fc_mask : 0;
         A = r;
     }
     else if (op == 0x27) {
-        // DAA
+        OPCODE("DAA");
         uint8_t adj = 0;
         if(Fn) {
             if(Fh) adj+=0x6;
@@ -917,30 +1000,31 @@ int cpu_tick()
         F |= (A==0?Fz_mask:0);
     }
     else if (op == 0x2F) {
-        // CPL
+        OPCODE("CPL");
         A = ~A;
         F |= Fn_mask | Fh_mask;
     }
     else if (op == 0x37) {
-        // SCF
+        OPCODE("SCF");
         F &= ~ (Fn_mask | Fh_mask);
         F |= Fc_mask;
     }
     else if (op == 0x3F) {
-        // CCF
+        OPCODE("CCF");
         F &= ~ (Fn_mask | Fh_mask);
         F ^= Fc_mask;
     }
     else if (op == 0xF3) {
-        // DI
+        OPCODE("DI");
         ime = false;
+        printf("IME set to false\n");
     }
     else if (op == 0xFB) {
-        // EI
-        ime_true_pending = 2;
+        OPCODE("EI");
+        ime_true_pending = 1;
     }
     else if (op == 0x10) {
-        // STOP
+        OPCODE("STOP");
         REG_DIV = 0;
         //halted = true;
     }
@@ -981,6 +1065,9 @@ int main(int argc, char* argv[]) {
             CYCLES_PR_FRAME = atoi(argv[++i]);
         } else if(strcmp(argv[i], "-b") == 0 && i + 1 < argc) {
             boot_rom_file = argv[++i];
+        } else if(strcmp(argv[i], "-br") == 0 && i + 1 < argc) {
+            break_at = (uint16_t)strtol(argv[++i], NULL, 16);
+            printf("Breakpoint set at %04x\n", break_at);
         } else {
             rom_file = argv[i];
         }
@@ -1117,21 +1204,13 @@ int main(int argc, char* argv[]) {
             }
             REG_DIV = new_div;
 
-            serial_timer += cycles;
-            if(serial_timer >= 512) {
-                serial_timer -= 512;
-                if(REG_SC & 0x80) {
-                    // TODO transfer data
-                    REG_SC &= ~0x80; // clear transfer flag
-                    REG_IF |= 0x8;   // request serial interrupt
-                }
-            }
-
-            tima_timer += cycles;
-            if(tima_timer >= tima_timer_reload) {
-                tima_timer -= tima_timer_reload;
-                if(REG_TAC & 0x4) {
-                    // Increment TIMA
+            static uint16_t tima_clock_cycles_table[] = {0x400, 0x10, 0x40, 0x100};
+            if ((REG_TAC & 0x4)) {
+                tima_timer_cycles += cycles;
+                uint16_t cycles = tima_clock_cycles_table[REG_TAC & 0x3];
+                while(tima_timer_cycles >= cycles) {
+                    tima_timer_cycles -= cycles;
+                    // TIMA clock tick
                     REG_TIMA++;
                     if(REG_TIMA == 0) {
                         // Overflow
@@ -1141,6 +1220,16 @@ int main(int argc, char* argv[]) {
                 }
             }
 
+            // Update serial timer
+            serial_timer += cycles;
+            if(serial_timer >= 512) {
+                serial_timer -= 512;
+                if(REG_SC & 0x80) {
+                    // TODO transfer data
+                    REG_SC &= ~0x80; // clear transfer flag
+                    REG_IF |= 0x8;   // request serial interrupt
+                }
+            }
 
 
 
