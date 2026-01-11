@@ -75,11 +75,17 @@ uint8_t& REG_NR33  = map[0xFF1D];
 uint8_t& REG_NR34  = map[0xFF1E];
 uint8_t& REG_NR51  = map[0xFF25];
 uint8_t& REG_NR52  = map[0xFF26];
+uint8_t& REG_LCDC  = map[0xFF40];
 uint8_t& REG_STAT  = map[0xFF41];
 uint8_t& REG_SCY   = map[0xFF42];
 uint8_t& REG_SCX   = map[0xFF43];
 uint8_t& REG_LY    = map[0xFF44];
 uint8_t& REG_LYC   = map[0xFF45];
+uint8_t& REG_BGP   = map[0xFF47];
+uint8_t& REG_OBP0  = map[0xFF48];
+uint8_t& REG_OBP1  = map[0xFF49];
+uint8_t& REG_WY    = map[0xFF4A];
+uint8_t& REG_WX    = map[0xFF4B];
 uint8_t& REG_IE    = map[0xFFFF];
 
 // Timers
@@ -87,6 +93,10 @@ uint16_t sys_counter = 0; // System counter for timers
 uint16_t tima_timer_cycles = 0;
 uint8_t div_apu = 0;     // Running at 512 Hz
 uint16_t serial_timer = 0; // Serial transfer timer
+
+// LCD state
+uint16_t lcd_window_line = 0;
+uint16_t lcd_scanline_cycles = 0;
 
 // Hacky sound channel 1 state
 bool sound_ch1_length_enable = false;
@@ -204,6 +214,9 @@ void write(uint16_t addr, uint8_t value)
     else if(addr >= 0xE000 && addr <= 0xFDFF) {
         map[addr - 0x2000] = value;
     }
+    else if (addr >= 0xFE00 && addr <= 0xFE9F) {
+        map[addr] = value;
+    }
     else if(addr >= 0xFEA0 && addr <= 0xFEFF) {
         printf("Trying to write %02x to forbidden range %04x (PC=%04x)\n", value, addr, PC);
         halted=true;
@@ -246,11 +259,6 @@ void write(uint16_t addr, uint8_t value)
         else if(addr == 0xFF26) {
             printf("Turning sound %s. %02x\n", value&0x80 ? "On": "Off", value);
             map[addr] = (map[addr] & 0x7F) | (value&0x80);
-        }
-        else if(addr == 0xFF41) {
-            printf("STAT: %02x\n", value);
-            value |= 0x80;
-            map[addr] = value;
         }
         else if (addr == 0xFF0F) {
             printf("IF: %02x\n", value);
@@ -353,6 +361,11 @@ void write(uint16_t addr, uint8_t value)
             printf("LCDC: %02x\n", value);
             map[addr] = value;
         }
+        else if(addr == 0xFF41) {
+            printf("STAT: %02x\n", value);
+            value |= 0x80;
+            map[addr] = value;
+        }
         else if (addr == 0xFF42) {
             //printf("SCY: %02x\n", value);
             map[addr] = value;
@@ -361,8 +374,20 @@ void write(uint16_t addr, uint8_t value)
             printf("SCX: %02x\n", value);
             map[addr] = value;
         }
+        else if (addr == 0xFF45) {
+            printf("LYC: %02x\n", value);
+            map[addr] = value;
+        }
         else if (addr == 0xFF47) {
             printf("BG palette %02x\n", value);
+            map[addr] = value;
+        }
+        else if (addr == 0xFF48) {
+            printf("OBP0: %02x\n", value);
+            map[addr] = value;
+        }
+        else if (addr == 0xFF49) {
+            printf("OBP1: %02x\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF4A) {
@@ -1158,7 +1183,6 @@ int main(int argc, char* argv[]) {
         post_boot_teleport(); 
 
     bool running = true;
-    int lcd_scanline_cycles_left = LCD_CYCLES_PER_SCANLINE;
 
     while (running) {
 
@@ -1280,22 +1304,206 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // LCD logic
-            lcd_scanline_cycles_left-=cycles; 
-            if(lcd_scanline_cycles_left <= 0) {
+            // LCD logic that needs to happen when a scanline is completed
+            lcd_scanline_cycles += cycles; 
+            bool draw_scanline = false;
+            if(lcd_scanline_cycles >= LCD_CYCLES_PER_SCANLINE) {
 
-                // New scanline
+                lcd_scanline_cycles -= LCD_CYCLES_PER_SCANLINE;
+
+                // Start a new scanline
                 REG_LY++;
-                if(REG_LY > LCD_SCANLINES)
+                if(REG_LY > LCD_SCANLINES) {
                     REG_LY=0;
+                    lcd_window_line = 0;
+                }
 
-                // Update stat
+                // Update stat for LYC match and trigger LYC=LY interrupt if enabled
                 REG_STAT &= (~4);
-                REG_STAT |= (REG_LYC==REG_LY)?4:0; // TODO fire interrupt
+                if(REG_LYC==REG_LY) {   
+                    REG_STAT |= 4;
+                    // Fire interrupt if enabled
+                    if (REG_STAT & 0x40) {
+                        REG_IF |= 0x2;
+                    }
+                } else {
+                    REG_STAT &= ~4;
+                }
 
-                //if(REG_LY == LCD_HEIGHT) printf("Vblank\n");
+                // Trigger interrupt if entering vblank
+                if(REG_LY == LCD_HEIGHT) {
+                    // Always request VBlank interrupt
+                    REG_IF |= 0x1; // Request VBlank interrupt
+                    // If STAT mode 1 (vblank) interrupt enabled, request LCD STAT interrupt
+                    if (REG_STAT & 0x10) {
+                        REG_IF |= 0x2;
+                    }
+                }
+                if (REG_LY >= LCD_HEIGHT) {
+                    // VBlank lines
+                    REG_STAT = (REG_STAT & ~3) | 1;
+                }
+                else {
+                    // Visible scanlines all start in mode 2
+                    REG_STAT = (REG_STAT & ~3) | 2;
+                    // If stat mode 2 interrupt enabled, request LCD STAT interrupt
+                    if(REG_STAT & 0x20) {
+                        REG_IF |= 0x2;
+                    }
+                }
+            }
 
-                lcd_scanline_cycles_left+=LCD_CYCLES_PER_SCANLINE;
+            // Handle LCD mode transition during scanline (only regular lines)
+            if(REG_LY < LCD_HEIGHT) {
+                if(lcd_scanline_cycles >= 80 && (REG_STAT & 3) == 2) {
+                    // Switch to mode 3
+                    REG_STAT = (REG_STAT & ~3) | 3;
+                    draw_scanline = true; 
+                }
+                else if(lcd_scanline_cycles >= 80 + 172 && (REG_STAT & 3) == 3) {
+                    // Switch to mode 0
+                    REG_STAT = (REG_STAT & ~3) | 0;
+                    // If stat mode 0 interrupt enabled, request LCD STAT interrupt
+                    if (REG_STAT & 0x8) {
+                        REG_IF |= 0x2;
+                    }
+                }
+            }
+            if(draw_scanline) {
+                // Copy to screen from memory for this scanline
+                if(REG_LCDC & 0x1) // BG enabled
+                {
+                    uint8_t* tilemap = (REG_LCDC & 0x8) ? (map + 0x9C00) : (map + 0x9800);
+                    uint8_t palette = REG_BGP;
+                    for(int x = 0; x < 160; ++x)
+                    {
+                        uint8_t vx = x + REG_SCX;
+                        uint8_t vy = REG_LY + REG_SCY;
+                        int tilex = vx >> 3, subtilex = vx & 0x7;
+                        int tiley = vy >> 3, subtiley = vy & 0x7;
+                        uint8_t tileidx = tilemap[tilex+tiley*32];
+                        uint8_t *tiledata = (REG_LCDC & 0x10) ? (map + 0x8000 + tileidx*16) : (map + 0x9000 + ((int8_t)tileidx)*16);
+                        tiledata += subtiley*2; // row
+
+                        uint8_t mask = 0x80 >> subtilex;
+                        int paletteidx = (*tiledata) & mask ? 1 : 0;
+                        paletteidx += *(tiledata+1) & mask ? 2 : 0;
+
+                        int color = (palette >> (paletteidx * 2)) & 0x3;
+                        screen[x+REG_LY*160] = color == 0 ? 0x00000000 :
+                                               color == 1 ? 0xFFAAAAAA :
+                                               color == 2 ? 0xFF555555 :
+                                                            0xFF000000;
+                    }
+                }
+
+                // Draw window if enabled, in front of bg and overlaps this scanline
+                if((REG_LCDC & 0x20) && (REG_LCDC & 0x1) && (REG_WY <= REG_LY) && (REG_WX <= 166)) {
+                    //uint8_t win_y = REG_LY - REG_WY;
+                    uint8_t* tilemap = (REG_LCDC & 0x40) ? (map + 0x9C00) : (map + 0x9800);
+                    uint8_t palette = REG_BGP;
+                    for(int win_x = 0; win_x < 160; ++win_x)
+                    {
+                        if(win_x + REG_WX < 7) continue; // before screen
+                        int x = win_x + REG_WX - 7;
+                        if(x >= 160) break;
+                        int tilex = win_x >> 3, subtilex = win_x & 0x7;
+                        int tiley = lcd_window_line /*win_y*/ >> 3, subtiley = lcd_window_line & 0x7;
+                        uint8_t tileidx = tilemap[tilex+tiley*32];
+                        uint8_t *tiledata = (REG_LCDC & 0x10) ? (map + 0x8000 + tileidx*16) : (map + 0x9000 + ((int8_t)tileidx)*16);
+                        tiledata += subtiley*2; // row
+
+                        uint8_t mask = 0x80 >> subtilex;
+                        int paletteidx = (*tiledata) & mask ? 1 : 0;
+                        paletteidx += *(tiledata+1) & mask ? 2 : 0;
+
+                        int color = (palette >> (paletteidx * 2)) & 0x3;
+                        screen[x+REG_LY*160] = color == 0 ? 0x00000000 :
+                                               color == 1 ? 0xFFAAAAAA :
+                                               color == 2 ? 0xFF555555 :
+                                                            0xFF000000;
+                    }
+                    lcd_window_line++;
+                }
+
+                // Draw sprites if enabled
+                if(REG_LCDC & 0x2) {
+
+                    uint8_t sprite_height = (REG_LCDC & 0x4) ? 16 : 8;
+                    // Find (up to 10) sprites on this scanline
+                    uint16_t sprites_on_line[10] = {}; // upper byte = x position, lower byte = sprite index
+                    uint8_t* oam = map + 0xFE00;
+                    int spritecount = 0;
+                    for(int i = 0; i < 40; ++i)
+                    {
+                        uint8_t sprite_y = *oam++; // Y position on screen + 16
+                        uint8_t sprite_x = *oam++; // X position on screen + 8
+                        oam+=2;
+                        if(sprite_y + sprite_height <= 16 || sprite_y >= 160) {
+                            // Not visible
+                            continue;
+                        }
+                        if(REG_LY + 16 >= sprite_y && REG_LY + 16 < sprite_y + sprite_height) {
+                            uint16_t sprite_to_add = (sprite_x << 8) | i;
+                            int place = spritecount;
+                            while(place > 0 && sprites_on_line[place-1] <= sprite_to_add) {
+                                sprites_on_line[place] = sprites_on_line[place-1];
+                                place--;
+                            }
+                            sprites_on_line[place] = sprite_to_add;
+                            spritecount++;
+                            if(spritecount == 10)
+                                break;
+                        }
+                    }
+                    // Now draw spritecount sprites on scanline
+                    for(int s = 0; s < spritecount; ++s) {
+
+                        uint8_t sprite_x = sprites_on_line[s] >> 8; // X position on screen + 8
+                        uint8_t sprite_index = sprites_on_line[s] & 0xFF;
+                        uint8_t* oam_entry = map + 0xFE00 + sprite_index * 4;
+                        uint8_t sprite_y = *(oam_entry);     // Y position on screen + 16
+                        uint8_t sprite_tile = *(oam_entry+2); // Tile index
+                        if(sprite_height == 16)
+                            sprite_tile &= 0xFE; // force even tile number for 8x16 sprites
+                        uint8_t sprite_attr = *(oam_entry+3); // Attributes
+                        bool flip_x = (sprite_attr & 0x20) != 0;
+                        bool flip_y = (sprite_attr & 0x40) != 0;
+                        bool behind_bg = (sprite_attr & 0x80) != 0;
+                        uint8_t palette = (sprite_attr & 0x10) ? REG_OBP1 : REG_OBP0;
+
+                        int line_in_sprite = REG_LY + 16 - sprite_y;
+                        if(flip_y)
+                            line_in_sprite = (sprite_height - 1) - line_in_sprite;
+                        uint8_t* tiledata = map + 0x8000 + sprite_tile * 16 + line_in_sprite * 2;
+
+                        for(int xpix = 0; xpix < 8; ++xpix)
+                        {
+                            int screen_x = sprite_x + xpix - 8;
+                            if(screen_x < 0 || screen_x >= 160)
+                                continue;
+                            int pixel_x_in_sprite = flip_x ? (7 - xpix) : xpix;
+                            uint8_t mask = 0x80 >> pixel_x_in_sprite;
+                            int paletteidx = (*tiledata) & mask ? 1 : 0;
+                            paletteidx += (*(tiledata+1) & mask) ? 2 : 0;
+                            if(paletteidx == 0)
+                                continue; // Transparent pixel
+
+                            // Get color from palette
+                            int color = (palette >> (paletteidx * 2)) & 0x3;
+                            // If behind bg and bg pixel not color 0, skip drawing
+                            if(behind_bg) {
+                                uint32_t bg_pixel = screen[screen_x + REG_LY * 160];
+                                if(bg_pixel != 0x00000000)
+                                    continue;
+                            }
+                            screen[screen_x + REG_LY * 160] = color == 0 ? 0x00000000 :
+                                                              color == 1 ? 0xFFAAAAAA :
+                                                              color == 2 ? 0xFF555555 :
+                                                                           0xFF000000;
+                        }
+                    }
+                }
             }
 
             cycles_left -= cycles;
@@ -1304,32 +1512,6 @@ int main(int argc, char* argv[]) {
         // Clear screen
         SDL_SetRenderDrawColor(renderer, 55, 75, 55, 255);
         SDL_RenderClear(renderer);
-
-        // Simple copy to screen from memory
-        uint8_t topx = REG_SCX;
-        uint8_t topy = REG_SCY;
-        for(int y = 0; y < 144; ++y)
-        {
-            for(int x = 0; x < 160; ++x)
-            {
-                uint8_t vx = x + topx;
-                uint8_t vy = y + topy;
-                int tilex = vx >> 3, subtilex = vx & 0x7;
-                int tiley = vy >> 3, subtiley = vy & 0x7;
-                uint8_t tileidx = map[0x9800+tilex+tiley*32];
-                uint8_t *tiledata = map + 0x8000 + tileidx*16;
-                tiledata += subtiley*2; // row
-                
-                uint8_t mask = 0x80 >> subtilex;
-                int paletteidx = (*tiledata) & mask ? 1 : 0;
-                paletteidx += *(tiledata+1) & mask ? 2 : 0;
-
-                screen[x+y*160] = paletteidx == 0 ? 0x00000000 :
-                                  paletteidx == 1 ? 0xFFAAAAAA :
-                                  paletteidx == 2 ? 0xFF555555 :
-                                                    0xFF000000;
-            }
-        }
 
         // Draw screen
         for(int x = 0; x < 160; ++x)
