@@ -76,6 +76,10 @@ uint8_t& REG_NR31  = map[0xFF1B];
 uint8_t& REG_NR32  = map[0xFF1C];
 uint8_t& REG_NR33  = map[0xFF1D];
 uint8_t& REG_NR34  = map[0xFF1E];
+uint8_t& REG_NR41  = map[0xFF20];
+uint8_t& REG_NR42  = map[0xFF21];
+uint8_t& REG_NR43  = map[0xFF22];
+uint8_t& REG_NR44  = map[0xFF23];
 uint8_t& REG_NR51  = map[0xFF25];
 uint8_t& REG_NR52  = map[0xFF26];
 uint8_t& REG_LCDC  = map[0xFF40];
@@ -117,6 +121,13 @@ uint8_t sound_ch2_length_timer = 0;
 uint16_t sound_ch2_period_divider = 0;
 uint8_t sound_ch2_envelope_timer = 0;
 uint8_t sound_ch2_volume = 0;
+
+// Sound channel 4 state
+bool sound_ch4_length_enable = false;
+uint8_t sound_ch4_length_timer = 0;
+uint8_t sound_ch4_envelope_timer = 0;
+uint8_t sound_ch4_volume = 0;
+uint16_t sound_ch4_lfsr = 0;
 
 // Keypad state
 uint8_t keys_state = 0x00; // all released
@@ -431,12 +442,23 @@ void write(uint16_t addr, uint8_t value)
             map[addr] = value;
         }
         else if (addr == 0xFF22) {
-            printf("NR43 Sound polynomial %02x\n", value);
+            printf("NR43 Freq and randomness %02x\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF23) {
-            printf("NR44 Sound period high %02x\n", value);
+            printf("NR44 Sound trigger %02x\n", value);
             value |= 0x3F;
+            if(value & 0x80) {
+                printf("  -> Triggering sound on chan 4\n");
+                REG_NR52 |= 0x4; // turn on chan 4
+                sound_ch4_length_enable = (value & 0x40);
+                if(sound_ch4_length_enable) {
+                    sound_ch4_length_timer = REG_NR41 & 0x3F;
+                }
+                sound_ch4_envelope_timer = 0;
+                sound_ch4_lfsr = 0;
+                sound_ch4_volume = REG_NR42 >> 4;
+            }
             map[addr] = value;
         }
         else if (addr == 0xFF24) {
@@ -548,6 +570,7 @@ void audio_callback(void* /*userdata*/, Uint8* stream, int len)
 {
     static float ch1_phase = 0;
     static float ch2_phase = 0;
+    static float ch4_phase = 0;
     static const uint8_t duty_masks[] = { 0x7F, 0x7E, 0x1E, 0x81 };
     float* fstream = (float*)stream;
 
@@ -590,6 +613,33 @@ void audio_callback(void* /*userdata*/, Uint8* stream, int len)
         ch2_phase = ch2_phase + ch2_rate / 48000.0f;
         while(ch2_phase > 8.0f) ch2_phase -= 8.0f;
     }   
+
+    // CH4
+    float ch4_vol = (REG_NR52 & 0x80) && (REG_NR52 & 0x04) ? 1.0f : 0.0f;
+    ch4_vol *= sound_ch4_volume / 15.0f;
+    float ch4_panleft = (REG_NR51 & 0x40) ? 1.0f : 0.0f;
+    float ch4_panright = (REG_NR51 & 0x04) ? 1.0f : 0.0f;
+
+    float ch4_rate = 262144.0f / (REG_NR43 & 0x7 ? REG_NR43 & 0x7 : 0.5f);
+    ch4_rate /= (1 << (REG_NR43 >> 4));
+    for(int i = 0, c = len/4; i < c; i+=2) {
+        float s = (sound_ch4_lfsr & 0x1) ? -0.25f : 0.25f;
+        float l = s*ch4_vol*ch4_panleft;
+        float r = s*ch4_vol*ch4_panright;
+        fstream[i]   += l;
+        fstream[i+1] += r;
+        ch4_phase = ch4_phase + ch4_rate / 48000.0f;
+        while(ch4_phase > 1.0f) {
+            ch4_phase -= 1.0f;
+            uint16_t feedback = (sound_ch4_lfsr & 1) ^ ((sound_ch4_lfsr & 0x2) >> 1);
+            feedback = (~feedback & 0x1);
+            sound_ch4_lfsr = (sound_ch4_lfsr & 0x7FFF) | (feedback << 15);
+            if(REG_NR43 & 0x4) {
+                sound_ch4_lfsr = (sound_ch4_lfsr & 0xFF7F) | (feedback << 7);
+            }
+            sound_ch4_lfsr >>= 1;
+        }
+    }
 }
 
 uint32_t disassemble = 0;
@@ -1393,9 +1443,9 @@ int main(int argc, char* argv[]) {
                 if(REG_NR52 & 0x2) {
 
                     // Channel 2 length timer
-                    if(sound_ch2_length_enable && (div_apu & 0x1) == 0 && sound_ch2_length_timer > 0) {
-                        sound_ch2_length_timer--;
-                        if(sound_ch2_length_timer == 0) {
+                    if(sound_ch2_length_enable && (div_apu & 0x1) == 0) {
+                        sound_ch2_length_timer++;
+                        if(sound_ch2_length_timer == 0x40) {
                             REG_NR52 &= ~0x2; // disable chan 2
                         }
                     }
@@ -1413,6 +1463,29 @@ int main(int argc, char* argv[]) {
                         }
                     }
                 }
+
+                if(REG_NR52 & 0x4) {
+                    // Channel 4 length timer
+                    if(sound_ch4_length_enable && (div_apu & 0x1) == 0) {
+                        sound_ch4_length_timer++;
+                        if(sound_ch4_length_timer == 0x40) {
+                            REG_NR52 &= ~0x4; // disable chan 4
+                        }
+                    }   
+
+                    // Channel 4 envelope timer
+                    uint8_t ch4_sweep_pace = REG_NR42 & 0x7;
+                    // sweep_pace is at apu/8 = 64hz steps
+                    if(ch4_sweep_pace > 0 && ((div_apu&0x7) == 0) && (++sound_ch4_envelope_timer == ch4_sweep_pace)) {
+                        sound_ch4_envelope_timer = 0;
+                        if(REG_NR42 & 0x8 && sound_ch4_volume < 15) {
+                            sound_ch4_volume++;
+                        } else if (sound_ch4_volume > 0) {
+                            sound_ch4_volume--;
+                        }
+                    }
+                }
+
             }
 
             // LCD logic that needs to happen when a scanline is completed
@@ -1621,7 +1694,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Clear screen
-        SDL_SetRenderDrawColor(renderer, 55, 75, 55, 255);
+        SDL_SetRenderDrawColor(renderer, 200, 240, 200, 255);
         SDL_RenderClear(renderer);
 
         // Draw screen
