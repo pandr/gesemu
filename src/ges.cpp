@@ -31,7 +31,6 @@ uint8_t mbc_type = 0;
 uint8_t mbc_rom_size_info = 0;
 uint8_t mbc_rom_banks = 0;
 
-
 // Flag masks
 #define Fz_mask (1<<7)
 #define Fn_mask (1<<6)
@@ -459,7 +458,6 @@ void write(uint16_t addr, uint8_t value)
             map[addr] = value;
         }
         else if (addr >= 0xFF30 && addr <= 0xFF3F) {
-            //printf("Wave RAM write %02x to %04x\n", value, addr);
             map[addr] = value;
         }
         else if (addr == 0xFF40) {
@@ -472,7 +470,6 @@ void write(uint16_t addr, uint8_t value)
             map[addr] = value;
         }
         else if (addr == 0xFF42) {
-            //printf("SCY: %02x\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF43) {
@@ -554,25 +551,6 @@ const int OP_T_STATES[] = {
         8,12,12, 0,12,16, 8,16, 8,16,12, 0,12, 0, 8,16, /* 0xD0 */
         12,12,8, 0, 0,16, 8,16,16, 4,16, 0, 0, 0, 8,16, /* 0xE0 */
         12,12,8, 4, 0,16, 8,16,12, 8,16, 4, 0, 0, 8,16  /* 0xF0 */
-        /*
-     4,12, 8, 8, 4, 4, 8, 4,20, 8, 8, 8, 4, 4, 8, 4,    // 0x00
-     4,12, 8, 8, 4, 4, 8, 4, 8, 8, 8, 8, 4, 4, 8, 4,    // 0x10
-     8,12, 8, 8, 4, 4, 8, 4, 8, 8, 8, 8, 4, 4, 8, 4,    // 0x20
-     8,12, 8, 8,12,12,12, 4, 8, 8, 8, 8, 4, 4, 8, 4,    // 0x30
-     4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 8, 4,    // 0x40
-     4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 8, 4,    // 0x50
-     4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 8, 4,    // 0x60
-     8, 8, 8, 8, 8, 8, 4, 8, 4, 4, 4, 4, 4, 4, 8, 4,    // 0x70
-     4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 8, 4,    // 0x80
-     4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 8, 4,    // 0x90
-     4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 8, 4,    // 0xA0
-     4, 4, 4, 4, 4, 4, 8, 4, 4, 4, 4, 4, 4, 4, 8, 4,    // 0xB0
-     8,12,12,12,12,16, 8,32, 8, 8,12, 8,12,12, 8,32,    // 0xC0
-     8,12,12, 0,12,16, 8,32, 8, 8,12, 0,12, 0, 8,32,    // 0xD0
-    12,12, 8, 0, 0,16, 8,32,16, 4,16, 0, 0, 0, 8,32,    // 0xE0
-    12,12, 8, 4, 0,16, 8,32,12, 8,16, 4, 0, 0, 8,32     // 0xF0
-    */
-
 };
 
 // Simple audio callback playing a square wave
@@ -649,8 +627,7 @@ int cpu_tick()
     if(halted) {
         return 4;
     }
-    if(PC == break_at)
-    {
+    if(PC == break_at) {
         printf("Reached %04x\n", PC);
         disassemble=1000000;
     }
@@ -674,7 +651,6 @@ int cpu_tick()
     }
 
     uint8_t op = read(PC);
-    //printf("%04x: %02x (SP:%04x)\n", PC, op, SP);
     cycles += OP_T_STATES[op];
     PC++;
 
@@ -839,9 +815,7 @@ int cpu_tick()
             printf("HALT encountered at PC=%04x\n", PC-1);
             bool ipending = (map[0xFF0F] & map[0xFFFF] & 0x1F) != 0;
             if(!ime && ipending) {
-                // HALT bug occurs
                 printf("HALT bug triggered! PC set back to %04x\n", PC);
-                // TODO
             }
             else {
                 // Normal HALT
@@ -945,7 +919,6 @@ int cpu_tick()
 
     else if (op == 0xCB) {
         op = read(PC);
-        //printf("Op 0xCB%02x on %04x\n", op, PC);
         PC++;
         cycles = 8; // Base cycles for CB ops
         // Extra cycles for (HL) ops
@@ -1165,8 +1138,7 @@ int cpu_tick()
 void load_rom(uint8_t* dst, uint32_t size, const char* filename)
 {
     FILE* f = fopen(filename, "rb");
-    if(!f)
-    {
+    if(!f) {
         printf("Failed to load rom from %s\n", filename);
         exit(1);
     }
@@ -1401,15 +1373,11 @@ int main(int argc, char* argv[]) {
 
                 // Channel 1 envelope timer
                 uint8_t ch1_sweep_pace = REG_NR12 & 0x7;
-                // sweep_pace is at apu/8 = 64hz steps
-                if(ch1_sweep_pace > 0 && ((div_apu&0x7) == 0) && (++sound_ch1_envelope_timer == ch1_sweep_pace))
-                {
+                if(ch1_sweep_pace > 0 && ((div_apu&0x7) == 0) && (++sound_ch1_envelope_timer == ch1_sweep_pace)) {
                     sound_ch1_envelope_timer = 0;
                     if(REG_NR12 & 0x8 && sound_ch1_volume < 15) {
-                        // Increase volume
                         sound_ch1_volume++;
                     } else if (sound_ch1_volume > 0) {
-                        // Decrease volume
                         sound_ch1_volume--;
                     }
                 }
@@ -1428,15 +1396,11 @@ int main(int argc, char* argv[]) {
 
                 // Channel 2 envelope timer
                 uint8_t ch2_sweep_pace = REG_NR22 & 0x7;
-                // sweep_pace is at apu/8 = 64hz steps
-                if(ch2_sweep_pace > 0 && ((div_apu&0x7) == 0) && (++sound_ch2_envelope_timer == ch2_sweep_pace))
-                {
+                if(ch2_sweep_pace > 0 && ((div_apu&0x7) == 0) && (++sound_ch2_envelope_timer == ch2_sweep_pace)) {
                     sound_ch2_envelope_timer = 0;
                     if(REG_NR22 & 0x8 && sound_ch2_volume < 15) {
-                        // Increase volume
                         sound_ch2_volume++;
                     } else if (sound_ch2_volume > 0) {
-                        // Decrease volume
                         sound_ch2_volume--;
                     }
                 }
@@ -1457,13 +1421,10 @@ int main(int argc, char* argv[]) {
                 }
 
                 // Update stat for LYC match and trigger LYC=LY interrupt if enabled
-                REG_STAT &= (~4);
-                if(REG_LYC==REG_LY) {   
+                if(REG_LYC==REG_LY) {
                     REG_STAT |= 4;
-                    // Fire interrupt if enabled
-                    if (REG_STAT & 0x40) {
+                    if (REG_STAT & 0x40)
                         REG_IF |= 0x2;
-                    }
                 } else {
                     REG_STAT &= ~4;
                 }
@@ -1546,7 +1507,7 @@ int main(int argc, char* argv[]) {
                         int x = win_x + REG_WX - 7;
                         if(x >= 160) break;
                         int tilex = win_x >> 3, subtilex = win_x & 0x7;
-                        int tiley = lcd_window_line /*win_y*/ >> 3, subtiley = lcd_window_line & 0x7;
+                        int tiley = lcd_window_line >> 3, subtiley = lcd_window_line & 0x7;
                         uint8_t tileidx = tilemap[tilex+tiley*32];
                         uint8_t *tiledata = (REG_LCDC & 0x10) ? (map + 0x8000 + tileidx*16) : (map + 0x9000 + ((int8_t)tileidx)*16);
                         tiledata += subtiley*2; // row
@@ -1660,8 +1621,7 @@ int main(int argc, char* argv[]) {
                 uint8_t r = col>>16;
                 uint8_t g = col>>8;
                 uint8_t b = col;
-                if(col>0)
-                {
+                if(col>0) {
                     SDL_SetRenderDrawColor(renderer, r, g, b, 255);
                     SDL_Rect rect = {x*SCREENSCALE, y*SCREENSCALE, SCREENSCALE, SCREENSCALE};
                     SDL_RenderFillRect(renderer, &rect);
