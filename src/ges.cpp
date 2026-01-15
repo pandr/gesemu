@@ -108,7 +108,6 @@ uint16_t sound_ch1_period_divider = 0;
 uint8_t sound_ch1_envelope_timer = 0;
 uint8_t sound_ch1_volume = 0;
 // Sweep  (only for channel 1)
-uint16_t sound_ch1_frq_sweep_divider = 0;
 uint8_t sound_ch1_frq_sweep_timer = 0;
 bool sound_ch1_frq_sweep_enabled = false;
 
@@ -336,11 +335,7 @@ void write(uint16_t addr, uint8_t value)
             map[addr] = value;
         }
         else if (addr == 0xFF11) {
-            uint8_t duty = value >> 6;
-            uint8_t cut = value & 0x3F;
-            cut = 0x40 - cut;
-            printf("NR11: Sound duty %02x length %02x\n", duty, cut);
-            value = (duty << 6) | cut;
+            printf("NR11: Sound duty %02x length %02x\n", value >> 6, value & 0x3F);
             map[addr] = value;
         }
         else if (addr == 0xFF12) {
@@ -359,26 +354,21 @@ void write(uint16_t addr, uint8_t value)
             value |= 0x38;
             map[addr] = value;
             if(value & 0x80) {
-                printf("  -> Triggering sound on chan 1\n");
                 REG_NR52 |= 0x1; // turn on chan 1
                 sound_ch1_length_enable = (value & 0x40);
-                if(sound_ch1_length_enable && sound_ch1_length_timer == 0) {
-                    sound_ch1_length_timer = REG_NR11 & 0x3F;
+                if(sound_ch1_length_enable) {
+                    sound_ch1_length_timer = (REG_NR11 & 0x3F);
                 }
                 sound_ch1_period_divider = REG_NR13 | ((REG_NR14 & 0x7)<<8);
                 sound_ch1_envelope_timer = 0;
                 sound_ch1_volume = REG_NR12 >> 4;
-                sound_ch1_frq_sweep_divider = sound_ch1_period_divider;
                 sound_ch1_frq_sweep_timer = 0;
                 sound_ch1_frq_sweep_enabled = REG_NR10 & 0x77;
+                printf("  -> Triggering sound on chan 1, length timer: %i\n", sound_ch1_length_timer);
             }
         }
         else if (addr == 0xFF16) {
-            uint8_t duty = value >> 6;
-            uint8_t cut = value & 0x3F;
-            cut = 0x40 - cut;
-            printf("NR21: Sound duty %02x length %02x\n", duty, cut);
-            value = (duty << 6) | cut;
+            printf("NR21: Sound duty %02x length %02x\n", value >> 6, value & 0x3F);
             map[addr] = value;
         }
         else if (addr == 0xFF17) {
@@ -558,6 +548,7 @@ void audio_callback(void* /*userdata*/, Uint8* stream, int len)
 {
     static float ch1_phase = 0;
     static float ch2_phase = 0;
+    static const uint8_t duty_masks[] = { 0x7F, 0x7E, 0x1E, 0x81 };
     float* fstream = (float*)stream;
 
     // CH1
@@ -567,19 +558,17 @@ void audio_callback(void* /*userdata*/, Uint8* stream, int len)
     float ch1_panright = (REG_NR51 & 0x01) ? 1.0f : 0.0f;
     uint8_t ch1_duty = REG_NR11 >> 6;
     float ch1_rate = 1048576.0f / (2048 - sound_ch1_period_divider); // 8 x freq
+    uint8_t ch1_duty_mask = duty_masks[ch1_duty];
     for(int i = 0, c = len/4; i < c; i+=2) {
-        uint8_t iphase = ch1_phase;
-        bool low = ch1_duty == 0 ? (iphase & 0x0F) :
-                   ch1_duty == 1 ? (iphase & 0x07) :
-                   ch1_duty == 2 ? (iphase & 0x03) :
-                                   (iphase & 0x07) == 0;
+        uint8_t iphase = (uint8_t)ch1_phase & 0x0F;
+        bool low = (1 << iphase) & ch1_duty_mask;
         float s = low ? -0.25f : 0.25f;
         float l = s*ch1_vol*ch1_panleft;
         float r = s*ch1_vol*ch1_panright;
         fstream[i]   = l;
         fstream[i+1] = r;
         ch1_phase = ch1_phase + ch1_rate / 48000.0f;
-        if(ch1_phase > 8.0f) ch1_phase -= 8.0f;
+        while(ch1_phase > 8.0f) ch1_phase -= 8.0f;
     }
 
     // CH2
@@ -589,19 +578,17 @@ void audio_callback(void* /*userdata*/, Uint8* stream, int len)
     float ch2_panright = (REG_NR51 & 0x02) ? 1.0f : 0.0f;
     uint8_t ch2_duty = REG_NR21 >> 6;
     float ch2_rate = 1048576.0f / (2048 - sound_ch2_period_divider); // 8 x freq
+    uint8_t ch2_duty_mask = duty_masks[ch2_duty];
     for(int i = 0, c = len/4; i < c; i+=2) {
-        uint8_t iphase = ch2_phase;
-        bool low = ch2_duty == 0 ? (iphase & 0x0F) :
-                   ch2_duty == 1 ? (iphase & 0x07) :
-                   ch2_duty == 2 ? (iphase & 0x03) :
-                                   (iphase & 0x07) == 0;
+        uint8_t iphase = (uint8_t)ch2_phase & 0x0F;
+        bool low = (1 << iphase) & ch2_duty_mask;
         float s = low ? -0.25f : 0.25f;
         float l = s*ch2_vol*ch2_panleft;
         float r = s*ch2_vol*ch2_panright;
         fstream[i]   += l;
         fstream[i+1] += r;
         ch2_phase = ch2_phase + ch2_rate / 48000.0f;
-        if(ch2_phase > 8.0f) ch2_phase -= 8.0f;
+        while(ch2_phase > 8.0f) ch2_phase -= 8.0f;
     }   
 }
 
@@ -1221,7 +1208,7 @@ int main(int argc, char* argv[]) {
     spec.freq = 48000;
     spec.format = AUDIO_F32SYS;  
     spec.channels = 2;
-    spec.samples = 1024;
+    spec.samples = 512;
     spec.callback = audio_callback;
     spec.userdata = NULL;
     SDL_AudioDeviceID audio_device;
@@ -1359,53 +1346,71 @@ int main(int argc, char* argv[]) {
                     // Sound disabled
                     continue;
                 }
-                
-                /*
-                // TODO sound stop timers
-                // Channel 1 length timer
-                if(sound_ch1_length_enable && sound_ch1_length_timer > 0) {
-                    sound_ch1_length_timer--;
-                    if(sound_ch1_length_timer == 0) {
-                        REG_NR52 &= ~0x1; // disable chan 1
-                    }
-                }
-                */
 
-                // Channel 1 envelope timer
-                uint8_t ch1_sweep_pace = REG_NR12 & 0x7;
-                // sweep_pace is at apu/8 = 64hz steps
-                if(ch1_sweep_pace > 0 && ((div_apu&0x7) == 0) && (++sound_ch1_envelope_timer == ch1_sweep_pace))
-                {
-                    sound_ch1_envelope_timer = 0;
-                    if(REG_NR12 & 0x8 && sound_ch1_volume < 15) {
-                        sound_ch1_volume++;
-                    } else if (sound_ch1_volume > 0) {
-                        sound_ch1_volume--;
-                    }
-                }
-
-                // Channel 1 frequency sweep timer
-                if(sound_ch1_frq_sweep_enabled && sound_ch1_frq_sweep_timer > 0) {
-                    sound_ch1_frq_sweep_timer--;
-                    if(sound_ch1_frq_sweep_timer == 0) {
-                        uint8_t sweep = REG_NR10 & 0x7;
-                        if(sweep > 0) {
-                            // TODO frequency calculation
+                if(REG_NR52 & 0x1) {
+                    // Channel 1 length timer
+                    if(sound_ch1_length_enable && (div_apu & 0x1) == 0) {
+                        sound_ch1_length_timer++;
+                        if(sound_ch1_length_timer == 0x40) {
+                            REG_NR52 &= ~0x1; // disable chan 1
                         }
-                        sound_ch1_frq_sweep_timer = sweep;
+                    }
+
+                    // Channel 1 envelope timer
+                    uint8_t ch1_sweep_pace = REG_NR12 & 0x7;
+                    // sweep_pace is at apu/8 = 64hz steps
+                    if(ch1_sweep_pace > 0 && ((div_apu&0x7) == 0) && (++sound_ch1_envelope_timer == ch1_sweep_pace))
+                    {
+                        sound_ch1_envelope_timer = 0;
+                        if(REG_NR12 & 0x8 && sound_ch1_volume < 15) {
+                            sound_ch1_volume++;
+                        } else if (sound_ch1_volume > 0) {
+                            sound_ch1_volume--;
+                        }
+                    }
+
+                    // Channel 1 frequency sweep timer
+                    if(sound_ch1_frq_sweep_enabled) {
+                        sound_ch1_frq_sweep_timer++;
+                        if(sound_ch1_frq_sweep_timer >= ((REG_NR10 & 0x70) >> 2)) {
+                            sound_ch1_frq_sweep_timer = 0;
+                            uint16_t divider_change = sound_ch1_period_divider >> ((REG_NR10&0x7));
+                            if(REG_NR10 & 0x8) {
+                                sound_ch1_period_divider -= divider_change;
+                            } else {
+                                sound_ch1_period_divider += divider_change;
+                                if(sound_ch1_period_divider > 0x7FF) {
+                                    sound_ch1_period_divider = 0x7FF;
+                                    REG_NR52 &= ~0x1; // disable chan 1
+                                }
+                            }
+                            REG_NR13 = sound_ch1_period_divider & 0xFF;
+                            REG_NR14 = (REG_NR14 & 0xF8) | ((sound_ch1_period_divider >> 8) & 0x7);
+                        }
                     }
                 }
 
-                // Channel 2 envelope timer
-                uint8_t ch2_sweep_pace = REG_NR22 & 0x7;
-                // sweep_pace is at apu/8 = 64hz steps
-                if(ch2_sweep_pace > 0 && ((div_apu&0x7) == 0) && (++sound_ch2_envelope_timer == ch2_sweep_pace))
-                {
-                    sound_ch2_envelope_timer = 0;
-                    if(REG_NR22 & 0x8 && sound_ch2_volume < 15) {
-                        sound_ch2_volume++;
-                    } else if (sound_ch2_volume > 0) {
-                        sound_ch2_volume--;
+                if(REG_NR52 & 0x2) {
+
+                    // Channel 2 length timer
+                    if(sound_ch2_length_enable && (div_apu & 0x1) == 0 && sound_ch2_length_timer > 0) {
+                        sound_ch2_length_timer--;
+                        if(sound_ch2_length_timer == 0) {
+                            REG_NR52 &= ~0x2; // disable chan 2
+                        }
+                    }
+
+                    // Channel 2 envelope timer
+                    uint8_t ch2_sweep_pace = REG_NR22 & 0x7;
+                    // sweep_pace is at apu/8 = 64hz steps
+                    if(ch2_sweep_pace > 0 && ((div_apu&0x7) == 0) && (++sound_ch2_envelope_timer == ch2_sweep_pace))
+                    {
+                        sound_ch2_envelope_timer = 0;
+                        if(REG_NR22 & 0x8 && sound_ch2_volume < 15) {
+                            sound_ch2_volume++;
+                        } else if (sound_ch2_volume > 0) {
+                            sound_ch2_volume--;
+                        }
                     }
                 }
             }
