@@ -1373,7 +1373,9 @@ int main(int argc, char* argv[]) {
 
                 // Channel 1 envelope timer
                 uint8_t ch1_sweep_pace = REG_NR12 & 0x7;
-                if(ch1_sweep_pace > 0 && ((div_apu&0x7) == 0) && (++sound_ch1_envelope_timer == ch1_sweep_pace)) {
+                // sweep_pace is at apu/8 = 64hz steps
+                if(ch1_sweep_pace > 0 && ((div_apu&0x7) == 0) && (++sound_ch1_envelope_timer == ch1_sweep_pace))
+                {
                     sound_ch1_envelope_timer = 0;
                     if(REG_NR12 & 0x8 && sound_ch1_volume < 15) {
                         sound_ch1_volume++;
@@ -1396,7 +1398,9 @@ int main(int argc, char* argv[]) {
 
                 // Channel 2 envelope timer
                 uint8_t ch2_sweep_pace = REG_NR22 & 0x7;
-                if(ch2_sweep_pace > 0 && ((div_apu&0x7) == 0) && (++sound_ch2_envelope_timer == ch2_sweep_pace)) {
+                // sweep_pace is at apu/8 = 64hz steps
+                if(ch2_sweep_pace > 0 && ((div_apu&0x7) == 0) && (++sound_ch2_envelope_timer == ch2_sweep_pace))
+                {
                     sound_ch2_envelope_timer = 0;
                     if(REG_NR22 & 0x8 && sound_ch2_volume < 15) {
                         sound_ch2_volume++;
@@ -1421,10 +1425,13 @@ int main(int argc, char* argv[]) {
                 }
 
                 // Update stat for LYC match and trigger LYC=LY interrupt if enabled
+                REG_STAT &= (~4);
                 if(REG_LYC==REG_LY) {
                     REG_STAT |= 4;
-                    if (REG_STAT & 0x40)
+                    // Fire interrupt if enabled
+                    if (REG_STAT & 0x40) {
                         REG_IF |= 0x2;
+                    }
                 } else {
                     REG_STAT &= ~4;
                 }
