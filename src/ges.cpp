@@ -68,6 +68,10 @@ uint8_t& REG_NR11  = map[0xFF11];
 uint8_t& REG_NR12  = map[0xFF12];
 uint8_t& REG_NR13  = map[0xFF13];
 uint8_t& REG_NR14  = map[0xFF14];
+uint8_t& REG_NR21  = map[0xFF16];
+uint8_t& REG_NR22  = map[0xFF17];
+uint8_t& REG_NR23  = map[0xFF18];
+uint8_t& REG_NR24  = map[0xFF19];
 uint8_t& REG_NR30  = map[0xFF1A];
 uint8_t& REG_NR31  = map[0xFF1B];
 uint8_t& REG_NR32  = map[0xFF1C];
@@ -98,15 +102,27 @@ uint16_t serial_timer = 0; // Serial transfer timer
 uint16_t lcd_window_line = 0;
 uint16_t lcd_scanline_cycles = 0;
 
-// Hacky sound channel 1 state
+// Sound channel 1 state
 bool sound_ch1_length_enable = false;
 uint8_t sound_ch1_length_timer = 0;
 uint16_t sound_ch1_period_divider = 0;
 uint8_t sound_ch1_envelope_timer = 0;
 uint8_t sound_ch1_volume = 0;
+// Sweep  (only for channel 1)
 uint16_t sound_ch1_frq_sweep_divider = 0;
 uint8_t sound_ch1_frq_sweep_timer = 0;
 bool sound_ch1_frq_sweep_enabled = false;
+
+// Sound channel 2 state
+bool sound_ch2_length_enable = false;
+uint8_t sound_ch2_length_timer = 0;
+uint16_t sound_ch2_period_divider = 0;
+uint8_t sound_ch2_envelope_timer = 0;
+uint8_t sound_ch2_volume = 0;
+
+// Keypad state
+uint8_t keys_state = 0x00; // all released
+uint8_t dpad_state = 0x00; // all released
 
 void dump_regs()
 {
@@ -187,6 +203,46 @@ void post_boot_teleport()
     map[0xffff] = 0x00;
 }
 
+uint8_t read(uint16_t addr)
+{
+    // Bank 0 rom
+    if(addr <= 0x3FFF) {
+        return booting ? boot_rom[addr] : rom[addr];
+    }
+    else if (addr <= 0x7FFF) {
+        uint8_t bank_mask = mbc_rom_banks - 1;
+        uint16_t bank_base = (mbc_rom_bank&bank_mask)*0x4000;
+        return rom[bank_base + addr - 0x4000];
+    }
+    // VRAM
+    else if (addr >= 0x8000 && addr <= 0x9FFF) {
+        return map[addr];
+    }
+    // WRAM
+    else if (addr >= 0xC000 && addr <= 0xDFFF) {
+        return map[addr];
+    }
+    // WRAM (ECHO)
+    else if(addr >= 0xE000 && addr <= 0xFDFF) {
+        return map[addr - 0x2000];
+    }
+    // Forbidden range
+    else if(addr >= 0xFEA0 && addr <= 0xFEFF) {
+        printf("Trying to read from forbidden range %04x\n", addr);
+        exit(1);
+    }
+    // I/O Range and HRAM and Interrupt
+    else if (addr >= 0xFF00) {
+        return map[addr];
+    }
+    else {
+        printf("Trying to read from unsupported addr %04x\n", addr);
+        exit(1);
+    }
+    return 0;
+}
+
+
 void write(uint16_t addr, uint8_t value)
 {
     // Check against writing to rom
@@ -218,15 +274,25 @@ void write(uint16_t addr, uint8_t value)
         map[addr] = value;
     }
     else if(addr >= 0xFEA0 && addr <= 0xFEFF) {
-        printf("Trying to write %02x to forbidden range %04x (PC=%04x)\n", value, addr, PC);
-        halted=true;
+        //printf("Trying to write %02x to forbidden range %04x (PC=%04x)\n", value, addr, PC);
+        //halted=true;
     }
     // Ports
     else if(addr >= 0xFF00 && addr < 0xFF80)
     {
         if(addr == 0xFF00) {
-            printf("Joypad write: %02x\n", value);
-            map[addr] = (map[addr] & 0x0F) | (value & 0x30) | 0xE0;
+            if((value & 0x30) == 0x10) {
+                // NOTE: Inverted logic; Buttons
+                map[addr] = 0xC0 | 0x10 | ((~keys_state) & 0x0F);
+            }
+            else if((value & 0x30) == 0x20) {
+                // NOTE: Inverted logic; D-pad
+                map[addr] = 0xC0 | 0x20 | ((~dpad_state) & 0x0F);
+            }
+            else {
+                // Neither or both
+                map[addr] = 0xC0 | (value & 0x30) | 0x0F;
+            }
         }
         else if(addr == 0xFF01) {
             printf("Serial write: %02x\n", value);
@@ -266,7 +332,7 @@ void write(uint16_t addr, uint8_t value)
             map[addr] = value;
         }
         else if (addr == 0xFF10) {
-            printf("Sound sweep %02x\n", value);
+            printf("NR10: Sound sweep %02x\n", value);
             value |= 0x80;
             map[addr] = value;
         }
@@ -274,7 +340,7 @@ void write(uint16_t addr, uint8_t value)
             uint8_t duty = value >> 6;
             uint8_t cut = value & 0x3F;
             cut = 0x40 - cut;
-            printf("Sound duty %02x length %02x\n", duty, cut);
+            printf("NR11: Sound duty %02x length %02x\n", duty, cut);
             value = (duty << 6) | cut;
             map[addr] = value;
         }
@@ -282,15 +348,15 @@ void write(uint16_t addr, uint8_t value)
             uint8_t vol = value >> 4;
             uint8_t env = (value & 0x8) >> 3;
             uint8_t sweep = value & 0x7;
-            printf("Chan 1: vol %i, env %i, sweep %i\n", vol, env, sweep);
+            printf("NR12: Chan 1: vol %i, env %i, sweep %i\n", vol, env, sweep);
             map[addr] = value;
         }
         else if (addr == 0xFF13) {
-            printf("Soundperiod-low %i\n", value);
+            printf("NR13: Soundperiod-low %i\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF14) {
-            printf("Soundperiod-high %02x\n", value);
+            printf("NR14: Soundperiod-high %02x\n", value);
             value |= 0x38;
             map[addr] = value;
             if(value & 0x80) {
@@ -306,6 +372,41 @@ void write(uint16_t addr, uint8_t value)
                 sound_ch1_frq_sweep_divider = sound_ch1_period_divider;
                 sound_ch1_frq_sweep_timer = 0;
                 sound_ch1_frq_sweep_enabled = REG_NR10 & 0x77;
+            }
+        }
+        else if (addr == 0xFF16) {
+            uint8_t duty = value >> 6;
+            uint8_t cut = value & 0x3F;
+            cut = 0x40 - cut;
+            printf("NR21: Sound duty %02x length %02x\n", duty, cut);
+            value = (duty << 6) | cut;
+            map[addr] = value;
+        }
+        else if (addr == 0xFF17) {
+            uint8_t vol = value >> 4;
+            uint8_t env = (value & 0x8) >> 3;
+            uint8_t sweep = value & 0x7;
+            printf("NR22: Chan 2: vol %i, env %i, sweep %i\n", vol, env, sweep);
+            map[addr] = value;
+        }
+        else if (addr == 0xFF18) {
+            printf("NR23: Chan 2: Soundperiod-low %i\n", value);
+            map[addr] = value;
+        }
+        else if (addr == 0xFF19) {
+            printf("NR24: Soundperiod-high %02x\n", value);
+            value |= 0x38;
+            map[addr] = value;
+            if(value & 0x80) {
+                printf("  -> Triggering sound on chan 2\n");
+                REG_NR52 |= 0x2; // turn on chan 2
+                sound_ch2_length_enable = (value & 0x40);
+                if(sound_ch2_length_enable && sound_ch2_length_timer == 0) {
+                    sound_ch2_length_timer = REG_NR21 & 0x3F;
+                }
+                sound_ch2_period_divider = REG_NR23 | ((REG_NR24 & 0x7)<<8);
+                sound_ch2_envelope_timer = 0;
+                sound_ch2_volume = REG_NR22 >> 4;
             }
         }
         else if (addr == 0xFF1A) {
@@ -357,6 +458,10 @@ void write(uint16_t addr, uint8_t value)
             printf("Sound pan %02x\n", value);
             map[addr] = value;
         }
+        else if (addr >= 0xFF30 && addr <= 0xFF3F) {
+            //printf("Wave RAM write %02x to %04x\n", value, addr);
+            map[addr] = value;
+        }
         else if (addr == 0xFF40) {
             printf("LCDC: %02x\n", value);
             map[addr] = value;
@@ -377,6 +482,14 @@ void write(uint16_t addr, uint8_t value)
         else if (addr == 0xFF45) {
             printf("LYC: %02x\n", value);
             map[addr] = value;
+        }
+        else if (addr == 0xFF46) {
+            printf("DMA: %02x\n", value);
+            map[addr] = value;
+            uint16_t source_addr = value << 8;
+            for(int i = 0; i < 0xA0; i++) {
+                map[0xFE00 + i] = read(source_addr + i);
+            }
         }
         else if (addr == 0xFF47) {
             printf("BG palette %02x\n", value);
@@ -422,45 +535,6 @@ void write(uint16_t addr, uint8_t value)
     }
 }
 
-uint8_t read(uint16_t addr)
-{
-    // Bank 0 rom
-    if(addr <= 0x3FFF) {
-        return booting ? boot_rom[addr] : rom[addr];
-    }
-    else if (addr <= 0x7FFF) {
-        uint8_t bank_mask = mbc_rom_banks - 1;
-        uint16_t bank_base = (mbc_rom_bank&bank_mask)*0x4000;
-        return rom[bank_base + addr - 0x4000];
-    }
-    // VRAM
-    else if (addr >= 0x8000 && addr <= 0x9FFF) {
-        return map[addr];
-    }
-    // WRAM
-    else if (addr >= 0xC000 && addr <= 0xDFFF) {
-        return map[addr];
-    }
-    // WRAM (ECHO)
-    else if(addr >= 0xE000 && addr <= 0xFDFF) {
-        return map[addr - 0x2000];
-    }
-    // Forbidden range
-    else if(addr >= 0xFEA0 && addr <= 0xFEFF) {
-        printf("Trying to read from forbidden range %04x\n", addr);
-        exit(1);
-    }
-    // I/O Range and HRAM and Interrupt
-    else if (addr >= 0xFF00) {
-        return map[addr];
-    }
-    else {
-        printf("Trying to read from unsupported addr %04x\n", addr);
-        exit(1);
-    }
-    return 0;
-}
-
 const int OP_T_STATES[] = {
 
 //   0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
@@ -504,32 +578,56 @@ const int OP_T_STATES[] = {
 // Simple audio callback playing a square wave
 void audio_callback(void* /*userdata*/, Uint8* stream, int len)
 {
-    // CH1 for now only
-    static float phase = 0;
-    float vol = (REG_NR52 & 0x80) && (REG_NR52 & 0x01) ? 1.0f : 0.0f;
-    vol *= sound_ch1_volume / 15.0f;
-    float panleft = (REG_NR51 & 0x10) ? 1.0f : 0.0f;
-    float panright = (REG_NR51 & 0x01) ? 1.0f : 0.0f;
+    static float ch1_phase = 0;
+    static float ch2_phase = 0;
     float* fstream = (float*)stream;
-    uint8_t duty = REG_NR11 >> 6;
-    float rate = 1048576.0f / (2048 - sound_ch1_period_divider); // 8 x freq
+
+    // CH1
+    float ch1_vol = (REG_NR52 & 0x80) && (REG_NR52 & 0x01) ? 1.0f : 0.0f;
+    ch1_vol *= sound_ch1_volume / 15.0f;
+    float ch1_panleft = (REG_NR51 & 0x10) ? 1.0f : 0.0f;
+    float ch1_panright = (REG_NR51 & 0x01) ? 1.0f : 0.0f;
+    uint8_t ch1_duty = REG_NR11 >> 6;
+    float ch1_rate = 1048576.0f / (2048 - sound_ch1_period_divider); // 8 x freq
     for(int i = 0, c = len/4; i < c; i+=2) {
-        uint8_t iphase = phase;
-        bool low = duty == 0 ? (iphase & 0x0F) :
-                   duty == 1 ? (iphase & 0x07) :
-                   duty == 2 ? (iphase & 0x03) :
-                               (iphase & 0x07) == 0;
+        uint8_t iphase = ch1_phase;
+        bool low = ch1_duty == 0 ? (iphase & 0x0F) :
+                   ch1_duty == 1 ? (iphase & 0x07) :
+                   ch1_duty == 2 ? (iphase & 0x03) :
+                                   (iphase & 0x07) == 0;
         float s = low ? -0.25f : 0.25f;
-        float l = s*vol*panleft;
-        float r = s*vol*panright;
+        float l = s*ch1_vol*ch1_panleft;
+        float r = s*ch1_vol*ch1_panright;
         fstream[i]   = l;
         fstream[i+1] = r;
-        phase = phase + rate / 48000.0f;
-        if(phase > 8.0f) phase -= 8.0f;
+        ch1_phase = ch1_phase + ch1_rate / 48000.0f;
+        if(ch1_phase > 8.0f) ch1_phase -= 8.0f;
     }
+
+    // CH2
+    float ch2_vol = (REG_NR52 & 0x80) && (REG_NR52 & 0x02) ? 1.0f : 0.0f;
+    ch2_vol *= sound_ch2_volume / 15.0f;
+    float ch2_panleft = (REG_NR51 & 0x20) ? 1.0f : 0.0f;
+    float ch2_panright = (REG_NR51 & 0x02) ? 1.0f : 0.0f;
+    uint8_t ch2_duty = REG_NR21 >> 6;
+    float ch2_rate = 1048576.0f / (2048 - sound_ch2_period_divider); // 8 x freq
+    for(int i = 0, c = len/4; i < c; i+=2) {
+        uint8_t iphase = ch2_phase;
+        bool low = ch2_duty == 0 ? (iphase & 0x0F) :
+                   ch2_duty == 1 ? (iphase & 0x07) :
+                   ch2_duty == 2 ? (iphase & 0x03) :
+                                   (iphase & 0x07) == 0;
+        float s = low ? -0.25f : 0.25f;
+        float l = s*ch2_vol*ch2_panleft;
+        float r = s*ch2_vol*ch2_panright;
+        fstream[i]   += l;
+        fstream[i+1] += r;
+        ch2_phase = ch2_phase + ch2_rate / 48000.0f;
+        if(ch2_phase > 8.0f) ch2_phase -= 8.0f;
+    }   
 }
 
-uint16_t disassemble = 0;
+uint32_t disassemble = 0;
 #define OPCODE(x) {if(disassemble>0){disassemble--; printf("(%04x) %04x: %02x %s\n", sys_counter, PC-1, op, x);}}
 
 static uint16_t break_at = 0xFFFF;
@@ -554,7 +652,7 @@ int cpu_tick()
     if(PC == break_at)
     {
         printf("Reached %04x\n", PC);
-        disassemble=100;
+        disassemble=1000000;
     }
 
     int cycles = 0;
@@ -688,6 +786,9 @@ int cpu_tick()
         uint16_t dst = (op & 0x38);
         write(--SP, PC >> 8);
         write(--SP, PC & 0xFF);
+        if(dst == 0x28) {
+            printf("RST 28h called - reg a: %02x. Switch to %04x\n", A, read(PC+2*A) + (read(PC+2*A+1)<<8));
+        }
         PC = dst;
     }
     else if ((op & 0xCF) == 0xC1) {
@@ -1198,9 +1299,30 @@ int main(int argc, char* argv[]) {
                 continue;
             }
 
-            if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_SPACE) {
-                continue;
+            if (event.type == SDL_KEYDOWN) {
+                switch(event.key.keysym.sym) {
+                    case SDLK_RIGHT: dpad_state |= 0x01; break;
+                    case SDLK_LEFT:  dpad_state |= 0x02; break;
+                    case SDLK_UP:    dpad_state |= 0x04; break;
+                    case SDLK_DOWN:  dpad_state |= 0x08; break;
+                    case SDLK_z:     keys_state |= 0x01; break; // A
+                    case SDLK_x:     keys_state |= 0x02; break; // B
+                    case SDLK_RETURN:keys_state |= 0x04; break; // Start
+                    case SDLK_RSHIFT:keys_state |= 0x08; break; // Select
+                }
             }
+            if (event.type == SDL_KEYUP) {
+                switch(event.key.keysym.sym) {
+                    case SDLK_RIGHT: dpad_state &= ~0x01; break;
+                    case SDLK_LEFT:  dpad_state &= ~0x02; break;
+                    case SDLK_UP:    dpad_state &= ~0x04; break;
+                    case SDLK_DOWN:  dpad_state &= ~0x08; break;
+                    case SDLK_z:     keys_state &= ~0x01; break;
+                    case SDLK_x:     keys_state &= ~0x02; break;
+                    case SDLK_RETURN:keys_state &= ~0x04; break;
+                    case SDLK_RSHIFT:keys_state &= ~0x08; break;
+                }
+            }   
 
             if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
                 running = false;
@@ -1250,8 +1372,8 @@ int main(int argc, char* argv[]) {
                 serial_timer -= 512;
                 if(REG_SC & 0x80) {
                     // TODO transfer data
-                    REG_SC &= ~0x80; // clear transfer flag
-                    REG_IF |= 0x8;   // request serial interrupt
+                    //REG_SC &= ~0x80; // clear transfer flag
+                    //REG_IF |= 0x8;   // request serial interrupt
                 }
             }
 
@@ -1261,12 +1383,13 @@ int main(int argc, char* argv[]) {
             // Update sound timers
             if(apu_tick) {
 
-                if(!(REG_NR52 & 0x80) || !(REG_NR52 & 0x01)) {
-                    // Sound disabled or channel 1 disabled
+                if(!(REG_NR52 & 0x80)) {
+                    // Sound disabled
                     continue;
                 }
                 
                 /*
+                // TODO sound stop timers
                 // Channel 1 length timer
                 if(sound_ch1_length_enable && sound_ch1_length_timer > 0) {
                     sound_ch1_length_timer--;
@@ -1277,9 +1400,9 @@ int main(int argc, char* argv[]) {
                 */
 
                 // Channel 1 envelope timer
-                uint8_t sweep_pace = REG_NR12 & 0x7;
+                uint8_t ch1_sweep_pace = REG_NR12 & 0x7;
                 // sweep_pace is at apu/8 = 64hz steps
-                if(sweep_pace > 0 && ((div_apu&0x7) == 0) && (++sound_ch1_envelope_timer == sweep_pace))
+                if(ch1_sweep_pace > 0 && ((div_apu&0x7) == 0) && (++sound_ch1_envelope_timer == ch1_sweep_pace))
                 {
                     sound_ch1_envelope_timer = 0;
                     if(REG_NR12 & 0x8 && sound_ch1_volume < 15) {
@@ -1300,6 +1423,21 @@ int main(int argc, char* argv[]) {
                             // TODO frequency calculation
                         }
                         sound_ch1_frq_sweep_timer = sweep;
+                    }
+                }
+
+                // Channel 2 envelope timer
+                uint8_t ch2_sweep_pace = REG_NR22 & 0x7;
+                // sweep_pace is at apu/8 = 64hz steps
+                if(ch2_sweep_pace > 0 && ((div_apu&0x7) == 0) && (++sound_ch2_envelope_timer == ch2_sweep_pace))
+                {
+                    sound_ch2_envelope_timer = 0;
+                    if(REG_NR22 & 0x8 && sound_ch2_volume < 15) {
+                        // Increase volume
+                        sound_ch2_volume++;
+                    } else if (sound_ch2_volume > 0) {
+                        // Decrease volume
+                        sound_ch2_volume--;
                     }
                 }
             }
