@@ -6,6 +6,7 @@
 // Memory and cpu
 uint8_t boot_rom[0x100] = {};  // boot rom
 uint8_t rom[0x100000] = {};   // cardridge data
+uint8_t ram[0x8000] = {};     // cardridge ram / up to 4 x 8kb banks
 uint8_t map[0x10000] = {};    // memory space visible by cpu
 
 uint16_t AF = 0; uint8_t& F = *((uint8_t*)&AF); uint8_t& A = *((uint8_t*)&AF + 1);
@@ -24,12 +25,17 @@ bool booting = true;
 bool halted = false;
 
 // MBC state
-uint8_t mbc_ram_enable = 0;
+bool mbc_ram_enable = false;
 uint8_t mbc_rom_bank = 1;
+uint8_t mbc_ram_bank = 0;
+uint8_t mbc_banking_mode = 0;
 // MBC Cardridge info
+uint8_t mbc_type_id = 0;
 uint8_t mbc_type = 0;
 uint8_t mbc_rom_size_info = 0;
 uint8_t mbc_rom_banks = 0;
+uint8_t mbc_ram_size_info = 0;
+uint8_t mbc_ram_banks = 0;
 
 // Flag masks
 #define Fz_mask (1<<7)
@@ -133,6 +139,9 @@ uint16_t sound_ch4_lfsr = 0;
 uint8_t keys_state = 0x00; // all released
 uint8_t dpad_state = 0x00; // all released
 
+bool verbose_logging = false;
+#define log_v_printf(x, ...) { if (verbose_logging) printf(x, ##__VA_ARGS__); }
+
 void dump_regs()
 {
     printf("Dumping regs:\n");
@@ -220,12 +229,25 @@ uint8_t read(uint16_t addr)
     }
     else if (addr <= 0x7FFF) {
         uint8_t bank_mask = mbc_rom_banks - 1;
-        uint16_t bank_base = (mbc_rom_bank&bank_mask)*0x4000;
+        uint32_t bank_base = (mbc_rom_bank&bank_mask)*0x4000;
         return rom[bank_base + addr - 0x4000];
     }
     // VRAM
     else if (addr >= 0x8000 && addr <= 0x9FFF) {
         return map[addr];
+    }
+    // RAM
+    else if (addr >= 0xA000 && addr <= 0xBFFF) {
+        if(mbc_ram_enable) {
+            uint8_t bank = 0;
+            if(mbc_banking_mode == 1)
+                bank = mbc_ram_bank;
+            return ram[addr - 0xA000 + bank*0x2000];
+        }
+        else {
+            printf("Trying to read from disabled ram at addr %04x\n", addr);
+            return 0xFF;
+        }
     }
     // WRAM
     else if (addr >= 0xC000 && addr <= 0xDFFF) {
@@ -256,12 +278,31 @@ void write(uint16_t addr, uint8_t value)
 {
     // Check against writing to rom
     if(addr <= 0x1FFF) {
-        printf("Ram enable %02x\n", value);
-        mbc_ram_enable = value;
+        log_v_printf("Ram enable %02x (written to %04x)\n", value, addr);
+        if((value & 0x0F) == 0x0A)
+            mbc_ram_enable = true;
+        else
+            mbc_ram_enable = false;
     }
     else if (addr <= 0x3FFF) {
-        mbc_rom_bank = value == 0 ? 1 : value;
-        printf("Rom bank %02x\n", mbc_rom_bank);
+        if(mbc_type == 1) {
+            mbc_rom_bank = value & 0x1F;
+            if(mbc_rom_bank == 0) mbc_rom_bank++;
+            log_v_printf("MBC1: Rom bank selected value: %02x bank: %02x\n", value, mbc_rom_bank);
+        }
+        else {
+            printf("Trying to write %02x to rom addr %04x\n", value, addr);
+            printf("Unknown MBC type %02x\n", mbc_type);
+            exit(1);
+        }
+    }
+    else if (addr <= 0x5FFF) {
+        log_v_printf("MBC ram/rom bank select %02x\n", value);
+        mbc_ram_bank = value & 0x03;
+    }
+    else if (addr <= 0x7FFF) {
+        log_v_printf("MBC bank mode %02x\n", value);
+        mbc_banking_mode = value & 1;
     }
     else if (addr < 0x8000) {
         printf("Trying to write %02x to rom addr %04x\n", value, addr);
@@ -270,6 +311,17 @@ void write(uint16_t addr, uint8_t value)
     // VRAM
     else if (addr >= 0x8000 && addr <= 0x9FFF) {
         map[addr] = value;
+    }
+    else if (addr >= 0xA000 && addr <= 0xBFFF) {
+        if(mbc_ram_enable) {
+            uint8_t bank = 0;
+            if(mbc_banking_mode == 1)
+                bank = mbc_ram_bank;
+            ram[addr - 0xA000 + bank*0x2000] = value;
+        }
+        else {
+            printf("Trying to write to disabled ram at addr %04x\n", addr);
+        }
     }
     // WRAM
     else if (addr >= 0xC000 && addr <= 0xDFFF) {
@@ -304,11 +356,11 @@ void write(uint16_t addr, uint8_t value)
             }
         }
         else if(addr == 0xFF01) {
-            printf("Serial write: %02x\n", value);
+            log_v_printf("Serial write: %02x\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF02) {
-            printf("Serial control write: %02x\n", value);
+            log_v_printf("Serial control write: %02x\n", value);
             value |= 0x7E;
             map[addr] = value;
         }
@@ -319,49 +371,49 @@ void write(uint16_t addr, uint8_t value)
             map[addr] = 0;
         }
         else if(addr == 0xFF05) {
-            printf("TIMA: %02x\n", value);
+            log_v_printf("TIMA: %02x\n", value);
             map[addr] = value;
         }
         else if(addr == 0xFF06) {
-            printf("TMA: %02x\n", value);
+            log_v_printf("TMA: %02x\n", value);
             map[addr] = value;
         }
         else if(addr == 0xFF07) {
-            printf("TAC: %02x\n", value);
+            log_v_printf("TAC: %02x\n", value);
             value |= 0xF8;
             map[addr] = value;
         }
         else if(addr == 0xFF26) {
-            printf("Turning sound %s. %02x\n", value&0x80 ? "On": "Off", value);
+            log_v_printf("Turning sound %s. %02x\n", value&0x80 ? "On": "Off", value);
             map[addr] = (map[addr] & 0x7F) | (value&0x80);
         }
         else if (addr == 0xFF0F) {
-            printf("IF: %02x\n", value);
+            log_v_printf("IF: %02x\n", value);
             value |= 0xE0;
             map[addr] = value;
         }
         else if (addr == 0xFF10) {
-            printf("NR10: Sound sweep %02x\n", value);
+            log_v_printf("NR10: Sound sweep %02x\n", value);
             value |= 0x80;
             map[addr] = value;
         }
         else if (addr == 0xFF11) {
-            printf("NR11: Sound duty %02x length %02x\n", value >> 6, value & 0x3F);
+            log_v_printf("NR11: Sound duty %02x length %02x\n", value >> 6, value & 0x3F);
             map[addr] = value;
         }
         else if (addr == 0xFF12) {
             uint8_t vol = value >> 4;
             uint8_t env = (value & 0x8) >> 3;
             uint8_t sweep = value & 0x7;
-            printf("NR12: Chan 1: vol %i, env %i, sweep %i\n", vol, env, sweep);
+            log_v_printf("NR12: Chan 1: vol %i, env %i, sweep %i\n", vol, env, sweep);
             map[addr] = value;
         }
         else if (addr == 0xFF13) {
-            printf("NR13: Soundperiod-low %i\n", value);
+            log_v_printf("NR13: Soundperiod-low %i\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF14) {
-            printf("NR14: Soundperiod-high %02x\n", value);
+            log_v_printf("NR14: Soundperiod-high %02x\n", value);
             value |= 0x38;
             map[addr] = value;
             if(value & 0x80) {
@@ -375,30 +427,30 @@ void write(uint16_t addr, uint8_t value)
                 sound_ch1_volume = REG_NR12 >> 4;
                 sound_ch1_frq_sweep_timer = 0;
                 sound_ch1_frq_sweep_enabled = REG_NR10 & 0x77;
-                printf("  -> Triggering sound on chan 1, length timer: %i\n", sound_ch1_length_timer);
+                log_v_printf("  -> Triggering sound on chan 1, length timer: %i\n", sound_ch1_length_timer);
             }
         }
         else if (addr == 0xFF16) {
-            printf("NR21: Sound duty %02x length %02x\n", value >> 6, value & 0x3F);
+            log_v_printf("NR21: Sound duty %02x length %02x\n", value >> 6, value & 0x3F);
             map[addr] = value;
         }
         else if (addr == 0xFF17) {
             uint8_t vol = value >> 4;
             uint8_t env = (value & 0x8) >> 3;
             uint8_t sweep = value & 0x7;
-            printf("NR22: Chan 2: vol %i, env %i, sweep %i\n", vol, env, sweep);
+            log_v_printf("NR22: Chan 2: vol %i, env %i, sweep %i\n", vol, env, sweep);
             map[addr] = value;
         }
         else if (addr == 0xFF18) {
-            printf("NR23: Chan 2: Soundperiod-low %i\n", value);
+            log_v_printf("NR23: Chan 2: Soundperiod-low %i\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF19) {
-            printf("NR24: Soundperiod-high %02x\n", value);
+            log_v_printf("NR24: Soundperiod-high %02x\n", value);
             value |= 0x38;
             map[addr] = value;
             if(value & 0x80) {
-                printf("  -> Triggering sound on chan 2\n");
+                log_v_printf("  -> Triggering sound on chan 2\n");
                 REG_NR52 |= 0x2; // turn on chan 2
                 sound_ch2_length_enable = (value & 0x40);
                 if(sound_ch2_length_enable && sound_ch2_length_timer == 0) {
@@ -410,46 +462,46 @@ void write(uint16_t addr, uint8_t value)
             }
         }
         else if (addr == 0xFF1A) {
-            printf("NR30 Sound on/off %02x\n", value);
+            log_v_printf("NR30 Sound on/off %02x\n", value);
             value |= 0x7F;
             map[addr] = value;
         }
         else if (addr == 0xFF1B) {
-            printf("NR31 Sound length %02x\n", value);
+            log_v_printf("NR31 Sound length %02x\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF1C) {
-            printf("NR32 Sound volume %02x\n", value);
+            log_v_printf("NR32 Sound volume %02x\n", value);
             value |= 0x9F;
             map[addr] = value;
         }
         else if (addr == 0xFF1D) {
-            printf("NR33 Sound period low %02x\n", value);
+            log_v_printf("NR33 Sound period low %02x\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF1E) {
-            printf("Sound period high %02x\n", value);
+            log_v_printf("Sound period high %02x\n", value);
             value |= 0x34;
             map[addr] = value;
         }
         else if (addr == 0xFF20) {
-            printf("NR41 Sound length %02x\n", value);
+            log_v_printf("NR41 Sound length %02x\n", value);
             value |= 0xC0;
             map[addr] = value;
         }
         else if (addr == 0xFF21) {
-            printf("NR42 Sound envelope %02x\n", value);
+            log_v_printf("NR42 Sound envelope %02x\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF22) {
-            printf("NR43 Freq and randomness %02x\n", value);
+            log_v_printf("NR43 Freq and randomness %02x\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF23) {
-            printf("NR44 Sound trigger %02x\n", value);
+            log_v_printf("NR44 Sound trigger %02x\n", value);
             value |= 0x3F;
             if(value & 0x80) {
-                printf("  -> Triggering sound on chan 4\n");
+                log_v_printf("  -> Triggering sound on chan 4\n");
                 REG_NR52 |= 0x4; // turn on chan 4
                 sound_ch4_length_enable = (value & 0x40);
                 if(sound_ch4_length_enable) {
@@ -462,22 +514,22 @@ void write(uint16_t addr, uint8_t value)
             map[addr] = value;
         }
         else if (addr == 0xFF24) {
-            printf("Master & vin: %02x\n", value);
+            log_v_printf("Master & vin: %02x\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF25) {
-            printf("Sound pan %02x\n", value);
+            log_v_printf("Sound pan %02x\n", value);
             map[addr] = value;
         }
         else if (addr >= 0xFF30 && addr <= 0xFF3F) {
             map[addr] = value;
         }
         else if (addr == 0xFF40) {
-            printf("LCDC: %02x\n", value);
+            log_v_printf("LCDC: %02x\n", value);
             map[addr] = value;
         }
         else if(addr == 0xFF41) {
-            printf("STAT: %02x\n", value);
+            log_v_printf("STAT: %02x\n", value);
             value |= 0x80;
             map[addr] = value;
         }
@@ -485,15 +537,15 @@ void write(uint16_t addr, uint8_t value)
             map[addr] = value;
         }
         else if (addr == 0xFF43) {
-            printf("SCX: %02x\n", value);
+            log_v_printf("SCX: %02x\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF45) {
-            printf("LYC: %02x\n", value);
+            log_v_printf("LYC: %02x\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF46) {
-            printf("DMA: %02x\n", value);
+            log_v_printf("DMA: %02x\n", value);
             map[addr] = value;
             uint16_t source_addr = value << 8;
             for(int i = 0; i < 0xA0; i++) {
@@ -501,27 +553,27 @@ void write(uint16_t addr, uint8_t value)
             }
         }
         else if (addr == 0xFF47) {
-            printf("BG palette %02x\n", value);
+            log_v_printf("BG palette %02x\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF48) {
-            printf("OBP0: %02x\n", value);
+            log_v_printf("OBP0: %02x\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF49) {
-            printf("OBP1: %02x\n", value);
+            log_v_printf("OBP1: %02x\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF4A) {
-            printf("WY: %02x\n", value);
+            log_v_printf("WY: %02x\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF4B) {
-            printf("WX: %02x\n", value);
+            log_v_printf("WX: %02x\n", value);
             map[addr] = value;
         }
         else if (addr == 0xFF4D) {
-            printf("KEY1: %02x\n", value);
+            log_v_printf("KEY1: %02x\n", value);
             map[addr] = value;
         }   
         else {
@@ -533,7 +585,7 @@ void write(uint16_t addr, uint8_t value)
     // HRAM
     else if (addr >= 0xFF80) {
         if(addr == 0xFFFF) {
-            printf("IE: %02x\n", value);
+            log_v_printf("IE: %02x\n", value);
             //value |= 0xE0;
         }
         map[addr] = value;
@@ -649,10 +701,10 @@ static uint16_t break_at = 0xFFFF;
 int cpu_tick()
 {
     if(ime_true_pending > 0) {
-        printf("IME pending\n");
+        log_v_printf("IME pending\n");
         if(--ime_true_pending == 0) {
             ime = true;
-            printf("IME set to true\n");
+            log_v_printf("IME set to true\n");
         }
     }
     bool irequested = REG_IE & REG_IF & 0x1F;
@@ -674,9 +726,9 @@ int cpu_tick()
     if(ime && irequested) {
         for(int i = 0; i < 5; i++) {
             if( (REG_IF & REG_IE) & (1<<i) ) {
-                printf("Handling interrupt %i. PC=%04x\n", i, PC);
+                log_v_printf("Handling interrupt %i. PC=%04x\n", i, PC);
                 ime = false;
-                printf("IME set to false\n");
+                log_v_printf("IME set to false\n");
                 REG_IF &= ~(1<<i);
                 write(--SP, (PC>>8)&0xFF);
                 write(--SP, PC&0xFF);
@@ -744,7 +796,7 @@ int cpu_tick()
         PC = read(SP++);
         PC |= read(SP++) << 8;
         ime = true;
-        printf("IME set to true\n");
+        log_v_printf("IME set to true\n");
     }
     else if ((op & 0xE7) == 0xC2) {
         OPCODE("JP cond, imm16");
@@ -799,9 +851,6 @@ int cpu_tick()
         uint16_t dst = (op & 0x38);
         write(--SP, PC >> 8);
         write(--SP, PC & 0xFF);
-        if(dst == 0x28) {
-            printf("RST 28h called - reg a: %02x. Switch to %04x\n", A, read(PC+2*A) + (read(PC+2*A+1)<<8));
-        }
         PC = dst;
     }
     else if ((op & 0xCF) == 0xC1) {
@@ -849,14 +898,14 @@ int cpu_tick()
         OPCODE("LD r8, r8");
         if(op == 0x76) {
             OPCODE("HALT");
-            printf("HALT encountered at PC=%04x\n", PC-1);
+            log_v_printf("HALT encountered at PC=%04x\n", PC-1);
             bool ipending = (map[0xFF0F] & map[0xFFFF] & 0x1F) != 0;
             if(!ime && ipending) {
-                printf("HALT bug triggered! PC set back to %04x\n", PC);
+                log_v_printf("HALT bug triggered! PC set back to %04x\n", PC);
             }
             else {
                 // Normal HALT
-                printf("CPU halted.\n");
+                log_v_printf("CPU halted.\n");
                 halted = true;
             }
         }
@@ -1153,7 +1202,7 @@ int cpu_tick()
     else if (op == 0xF3) {
         OPCODE("DI");
         ime = false;
-        printf("IME set to false\n");
+        log_v_printf("IME set to false\n");
     }
     else if (op == 0xFB) {
         OPCODE("EI");
@@ -1200,6 +1249,8 @@ int main(int argc, char* argv[]) {
             CYCLES_PR_FRAME = atoi(argv[++i]);
         } else if(strcmp(argv[i], "-b") == 0 && i + 1 < argc) {
             boot_rom_file = argv[++i];
+        } else if(strcmp(argv[i], "-v") == 0) {
+            verbose_logging = true;
         } else if(strcmp(argv[i], "-br") == 0 && i + 1 < argc) {
             break_at = (uint16_t)strtol(argv[++i], NULL, 16);
             printf("Breakpoint set at %04x\n", break_at);
@@ -1277,11 +1328,48 @@ int main(int argc, char* argv[]) {
     if(rom_file) {
         printf("Loading rom %s\n", rom_file);
         load_rom(rom, sizeof(rom), rom_file);
-        mbc_type = rom[0x147];
+        mbc_type_id = rom[0x147];
         mbc_rom_size_info = rom[0x148];
+        mbc_ram_size_info = rom[0x149];
+        static const uint8_t mbc_type_table[] = {
+            1, // 00 - ROM ONLY
+            1, // 01 - MBC1
+            1, // 02 - MBC1+RAM
+            1, // 03 - MBC1+RAM+BATTERY
+            2, // 04 - MBC2
+            2, // 05 - MBC2+BATTERY (no RAM)
+            0, // 06 - ROM+RAM+BATTERY
+            0, // 07 - MMM01
+            0, // 08 - MMM01+RAM
+            0, // 09 - MMM01+RAM+BATTERY
+            3, // 0A - MBC3+TIMER+BATTERY
+            3, // 0B - MBC3+TIMER+RAM+BATTERY
+            3, // 0C - MBC3
+            3, // 0D - MBC3+RAM
+            3, // 0E - MBC3+RAM+BATTERY
+            4, // 0F - MBC4 (HuC3)
+            4, // 10 - MBC4+RAM (HuC3)
+            4, // 11 - MBC4+RAM+BATTERY (HuC3)
+            5, // 12 - MBC5
+            5, // 13 - MBC5+RAM
+            5, // 14 - MBC5+RAM+BATTERY
+            5, // 15 - MBC5+RUMBLE
+            5, // 16 - MBC5+RUMBLE+RAM
+            5, // 17 - MBC5+RUMBLE+RAM+BATTERY
+            0, // 18 - Pocket Camera
+            0, // 19 - Bandai TAMA5
+            0, // 1A - HuC-1
+            0, // 1B - HuC-1+RAM+BATTERY
+            0, // 1C - HuC-2
+        };
+        static const uint8_t mbc_ram_banks_table[] = {0, 0, 1, 4, 16, 8}; // Number of 8KB RAM banks
+        mbc_ram_banks = mbc_ram_banks_table[mbc_ram_size_info];
         mbc_rom_banks = 2 << mbc_rom_size_info;
+        mbc_type = mbc_type_table[mbc_type_id];
+        printf("MBC type id: %02x\n", mbc_type_id);
         printf("MBC type: %02x\n", mbc_type);
         printf("MBC rom size: %02x (%02x banks)\n", mbc_rom_size_info, mbc_rom_banks);
+        printf("MBC ram size: %02x (%02x banks)\n", mbc_ram_banks*1024*8, mbc_ram_banks);
     }
     if(boot_rom_file) {
         printf("Loading boot-rom %s\n", boot_rom_file);
@@ -1294,6 +1382,8 @@ int main(int argc, char* argv[]) {
 
     bool running = true;
 
+    int64_t frame_target = 0;
+    uint64_t target_duration = timer_freq / 59.7275f;
     while (running) {
 
         uint64_t frame_start = SDL_GetPerformanceCounter();
@@ -1694,7 +1784,7 @@ int main(int argc, char* argv[]) {
         }
 
         // Clear screen
-        SDL_SetRenderDrawColor(renderer, 200, 240, 200, 255);
+        SDL_SetRenderDrawColor(renderer, 200, 220, 200, 255);
         SDL_RenderClear(renderer);
 
         // Draw screen
@@ -1719,9 +1809,23 @@ int main(int argc, char* argv[]) {
 
         uint64_t frame_end = SDL_GetPerformanceCounter();
         uint64_t frame_duration = frame_end - frame_start;
-        uint64_t target_duration = timer_freq / 60;
-        if(frame_duration < target_duration) {
-            SDL_Delay((target_duration - frame_duration) * 1000 / timer_freq);
+
+        frame_target += target_duration;
+        frame_target -= frame_duration;
+
+        if(frame_target > 0) {
+            uint64_t ms = frame_target * 1000 / timer_freq;
+            if(ms > 20) ms = 20;
+            SDL_Delay(ms);
+        }
+
+        uint64_t frame_real_end = SDL_GetPerformanceCounter();
+        frame_target -= frame_real_end - frame_end;
+
+        if (frame_target < -100000)
+        {
+            printf("Teleport\n");
+            frame_target = 0;
         }
     }
 
