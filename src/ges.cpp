@@ -392,7 +392,7 @@ void write(uint16_t addr, uint8_t value)
                 sound_ch1_envelope_timer = 0;
                 sound_ch1_volume = REG_NR12 >> 4;
                 sound_ch1_frq_sweep_timer = 0;
-                sound_ch1_frq_sweep_enabled = REG_NR10 & 0x77;
+                sound_ch1_frq_sweep_enabled = (REG_NR10 & 0x77) != 0;
                 log_v_printf("  -> Triggering sound on chan 1, length timer: %i\n", sound_ch1_length_timer);
             }
         }
@@ -597,7 +597,7 @@ const int OP_T_STATES[] = {
 static inline void render_square_channel(float* fstream, int len, uint8_t ch_enable_mask, uint8_t pan_left_mask, uint8_t pan_right_mask, uint8_t duty_reg, uint16_t period_divider, uint8_t volume, float* phase)
 {
     static const uint8_t duty_masks[] = { 0x7F, 0x7E, 0x1E, 0x81 };
-    float vol = (REG_NR52 & 0x80) && (REG_NR52 & ch_enable_mask) ? 1.0f : 0.0f;
+    float vol = (REG_NR52 & ch_enable_mask) ? 1.0f : 0.0f;
     vol *= volume / 15.0f;
     float panleft = (REG_NR51 & pan_left_mask) ? 1.0f : 0.0f;
     float panright = (REG_NR51 & pan_right_mask) ? 1.0f : 0.0f;
@@ -628,6 +628,11 @@ void audio_callback(void* /*userdata*/, Uint8* stream, int len)
 
     memset(fstream, 0, len); // clear to 0.0 so we can add channel contributions
 
+    // Early return if sound is disabled
+    if((REG_NR52 & 0x80) == 0) {
+        return;
+    }
+
     // CH1 - square with envelope and frequency sweep
     render_square_channel(fstream, len, 0x01, 0x10, 0x01, REG_NR11, sound_ch1_period_divider, sound_ch1_volume, &ch1_phase);
 
@@ -635,15 +640,14 @@ void audio_callback(void* /*userdata*/, Uint8* stream, int len)
     render_square_channel(fstream, len, 0x02, 0x20, 0x02, REG_NR21, sound_ch2_period_divider, sound_ch2_volume, &ch2_phase);   
 
     // CH3 - waveform
-    float ch3_volume = (REG_NR52 & 0x80) && (REG_NR52 & 0x04) ? 1.0f : 0.0f;
+    float ch3_volume = (REG_NR52 & 0x04) ? 1.0f : 0.0f;
     float ch3_panleft = (REG_NR51 & 0x40) ? 1.0f : 0.0f;
     float ch3_panright = (REG_NR51 & 0x04) ? 1.0f : 0.0f;
     float ch3_rate = 2097152.0f / (2048 - sound_ch3_period_divider);
     for(int i = 0, c = len/4; i < c; i+=2) {
         uint8_t iphase = (uint8_t)ch3_phase & 0x1F;
         uint8_t sample = read(0xFF30+(iphase >> 1));
-        sample = (iphase & 0) ? sample >> 4 : sample & 0x0F; // Upper nibble first
-        //sample = iphase < 16 ? 0 : 0xF;
+        sample = (iphase & 1) == 0 ? sample >> 4 : sample & 0x0F; // Upper nibble first
         float s = 0.5f * sample / 15.0f - 0.25f; //  -0.25f - 0.25f
         static const float volume[] = {0.0f, 1.0f, 0.5f, 0.25f};
         s *= ch3_volume * volume[sound_ch3_volume];
@@ -654,7 +658,7 @@ void audio_callback(void* /*userdata*/, Uint8* stream, int len)
     }
 
     // CH4 - noise
-    float ch4_vol = (REG_NR52 & 0x80) && (REG_NR52 & 0x08) ? 1.0f : 0.0f;
+    float ch4_vol = (REG_NR52 & 0x08) ? 1.0f : 0.0f;
     ch4_vol *= sound_ch4_volume / 15.0f;
     float ch4_panleft = (REG_NR51 & 0x80) ? 1.0f : 0.0f;
     float ch4_panright = (REG_NR51 & 0x08) ? 1.0f : 0.0f;
@@ -1570,7 +1574,6 @@ int main(int argc, char* argv[]) {
                 }
 
                 // Update stat for LYC match and trigger LYC=LY interrupt if enabled
-                REG_STAT &= (~4);
                 if(REG_LYC==REG_LY) {
                     REG_STAT |= 4;
                     // Fire interrupt if enabled
