@@ -618,54 +618,47 @@ const int OP_T_STATES[] = {
         12,12,8, 4, 0,16, 8,16,12, 8,16, 4, 0, 0, 8,16  /* 0xF0 */
 };
 
+static inline void render_square_channel(float* fstream, int len, uint8_t ch_enable_mask, uint8_t pan_left_mask, uint8_t pan_right_mask, uint8_t duty_reg, uint16_t period_divider, uint8_t volume, float* phase, bool add_to_stream)
+{
+    static const uint8_t duty_masks[] = { 0x7F, 0x7E, 0x1E, 0x81 };
+    float vol = (REG_NR52 & 0x80) && (REG_NR52 & ch_enable_mask) ? 1.0f : 0.0f;
+    vol *= volume / 15.0f;
+    float panleft = (REG_NR51 & pan_left_mask) ? 1.0f : 0.0f;
+    float panright = (REG_NR51 & pan_right_mask) ? 1.0f : 0.0f;
+    uint8_t duty = duty_reg >> 6;
+    float rate = 1048576.0f / (2048 - period_divider);
+    uint8_t duty_mask = duty_masks[duty];
+    for(int i = 0, c = len/4; i < c; i+=2) {
+        uint8_t iphase = (uint8_t)*phase & 0x0F;
+        bool low = (1 << iphase) & duty_mask;
+        float s = low ? -0.25f : 0.25f;
+        float l = s*vol*panleft;
+        float r = s*vol*panright;
+        if(add_to_stream) {
+            fstream[i]   += l;
+            fstream[i+1] += r;
+        } else {
+            fstream[i]   = l;
+            fstream[i+1] = r;
+        }
+        *phase = *phase + rate / 48000.0f;
+        while(*phase > 8.0f) *phase -= 8.0f;
+    }
+}
+
 // Simple audio callback playing a square wave
 void audio_callback(void* /*userdata*/, Uint8* stream, int len)
 {
     static float ch1_phase = 0;
     static float ch2_phase = 0;
     static float ch4_phase = 0;
-    static const uint8_t duty_masks[] = { 0x7F, 0x7E, 0x1E, 0x81 };
     float* fstream = (float*)stream;
 
     // CH1
-    float ch1_vol = (REG_NR52 & 0x80) && (REG_NR52 & 0x01) ? 1.0f : 0.0f;
-    ch1_vol *= sound_ch1_volume / 15.0f;
-    float ch1_panleft = (REG_NR51 & 0x10) ? 1.0f : 0.0f;
-    float ch1_panright = (REG_NR51 & 0x01) ? 1.0f : 0.0f;
-    uint8_t ch1_duty = REG_NR11 >> 6;
-    float ch1_rate = 1048576.0f / (2048 - sound_ch1_period_divider); // 8 x freq
-    uint8_t ch1_duty_mask = duty_masks[ch1_duty];
-    for(int i = 0, c = len/4; i < c; i+=2) {
-        uint8_t iphase = (uint8_t)ch1_phase & 0x0F;
-        bool low = (1 << iphase) & ch1_duty_mask;
-        float s = low ? -0.25f : 0.25f;
-        float l = s*ch1_vol*ch1_panleft;
-        float r = s*ch1_vol*ch1_panright;
-        fstream[i]   = l;
-        fstream[i+1] = r;
-        ch1_phase = ch1_phase + ch1_rate / 48000.0f;
-        while(ch1_phase > 8.0f) ch1_phase -= 8.0f;
-    }
+    render_square_channel(fstream, len, 0x01, 0x10, 0x01, REG_NR11, sound_ch1_period_divider, sound_ch1_volume, &ch1_phase, false);
 
     // CH2
-    float ch2_vol = (REG_NR52 & 0x80) && (REG_NR52 & 0x02) ? 1.0f : 0.0f;
-    ch2_vol *= sound_ch2_volume / 15.0f;
-    float ch2_panleft = (REG_NR51 & 0x20) ? 1.0f : 0.0f;
-    float ch2_panright = (REG_NR51 & 0x02) ? 1.0f : 0.0f;
-    uint8_t ch2_duty = REG_NR21 >> 6;
-    float ch2_rate = 1048576.0f / (2048 - sound_ch2_period_divider); // 8 x freq
-    uint8_t ch2_duty_mask = duty_masks[ch2_duty];
-    for(int i = 0, c = len/4; i < c; i+=2) {
-        uint8_t iphase = (uint8_t)ch2_phase & 0x0F;
-        bool low = (1 << iphase) & ch2_duty_mask;
-        float s = low ? -0.25f : 0.25f;
-        float l = s*ch2_vol*ch2_panleft;
-        float r = s*ch2_vol*ch2_panright;
-        fstream[i]   += l;
-        fstream[i+1] += r;
-        ch2_phase = ch2_phase + ch2_rate / 48000.0f;
-        while(ch2_phase > 8.0f) ch2_phase -= 8.0f;
-    }   
+    render_square_channel(fstream, len, 0x02, 0x20, 0x02, REG_NR21, sound_ch2_period_divider, sound_ch2_volume, &ch2_phase, true);   
 
     // CH4
     float ch4_vol = (REG_NR52 & 0x80) && (REG_NR52 & 0x04) ? 1.0f : 0.0f;
