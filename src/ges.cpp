@@ -1294,37 +1294,7 @@ int main(int argc, char* argv[]) {
         mbc_type_id = rom[0x147];
         mbc_rom_size_info = rom[0x148];
         mbc_ram_size_info = rom[0x149];
-        static const uint8_t mbc_type_table[] = {
-            1, // 00 - ROM ONLY
-            1, // 01 - MBC1
-            1, // 02 - MBC1+RAM
-            1, // 03 - MBC1+RAM+BATTERY
-            2, // 04 - MBC2
-            2, // 05 - MBC2+BATTERY (no RAM)
-            0, // 06 - ROM+RAM+BATTERY
-            0, // 07 - MMM01
-            0, // 08 - MMM01+RAM
-            0, // 09 - MMM01+RAM+BATTERY
-            3, // 0A - MBC3+TIMER+BATTERY
-            3, // 0B - MBC3+TIMER+RAM+BATTERY
-            3, // 0C - MBC3
-            3, // 0D - MBC3+RAM
-            3, // 0E - MBC3+RAM+BATTERY
-            4, // 0F - MBC4 (HuC3)
-            4, // 10 - MBC4+RAM (HuC3)
-            4, // 11 - MBC4+RAM+BATTERY (HuC3)
-            5, // 12 - MBC5
-            5, // 13 - MBC5+RAM
-            5, // 14 - MBC5+RAM+BATTERY
-            5, // 15 - MBC5+RUMBLE
-            5, // 16 - MBC5+RUMBLE+RAM
-            5, // 17 - MBC5+RUMBLE+RAM+BATTERY
-            0, // 18 - Pocket Camera
-            0, // 19 - Bandai TAMA5
-            0, // 1A - HuC-1
-            0, // 1B - HuC-1+RAM+BATTERY
-            0, // 1C - HuC-2
-        };
+        static const uint8_t mbc_type_table[] = {1,1,1,1, 2,2, 0,0,0,0, 3,3,3,3,3, 4,4,4, 5,5,5,5,5,5, 0,0,0,0,0};
         static const uint8_t mbc_ram_banks_table[] = {0, 0, 1, 4, 16, 8}; // Number of 8KB RAM banks
         mbc_ram_banks = mbc_ram_banks_table[mbc_ram_size_info];
         mbc_rom_banks = 2 << mbc_rom_size_info;
