@@ -1240,6 +1240,16 @@ void load_rom(uint8_t* dst, uint32_t size, const char* filename)
     fclose(f);
 }
 
+static inline uint32_t get_tile_pixel(int tilex, int subtilex, int tiley, int subtiley, uint8_t* tilemap, uint8_t palette)
+{
+    uint8_t tileidx = tilemap[tilex+tiley*32];
+    uint8_t *tiledata = (REG_LCDC & 0x10) ? (map + 0x8000 + tileidx*16) : (map + 0x9000 + ((int8_t)tileidx)*16);
+    tiledata += subtiley*2;
+    uint8_t mask = 0x80 >> subtilex;
+    int paletteidx = (*tiledata & mask ? 1 : 0) + (*(tiledata+1) & mask ? 2 : 0);
+    return palette_colors[(palette >> (paletteidx * 2)) & 0x3];
+}
+
 int main(int argc, char* argv[]) {
     char* rom_file = NULL;
     char* boot_rom_file = NULL;
@@ -1645,52 +1655,27 @@ int main(int argc, char* argv[]) {
                 }
             }
             if(draw_scanline) {
+
                 // Copy to screen from memory for this scanline
                 if(REG_LCDC & 0x1) // BG enabled
                 {
                     uint8_t* tilemap = (REG_LCDC & 0x8) ? (map + 0x9C00) : (map + 0x9800);
-                    uint8_t palette = REG_BGP;
                     for(int x = 0; x < 160; ++x)
                     {
-                        uint8_t vx = x + REG_SCX;
-                        uint8_t vy = REG_LY + REG_SCY;
-                        int tilex = vx >> 3, subtilex = vx & 0x7;
-                        int tiley = vy >> 3, subtiley = vy & 0x7;
-                        uint8_t tileidx = tilemap[tilex+tiley*32];
-                        uint8_t *tiledata = (REG_LCDC & 0x10) ? (map + 0x8000 + tileidx*16) : (map + 0x9000 + ((int8_t)tileidx)*16);
-                        tiledata += subtiley*2; // row
-
-                        uint8_t mask = 0x80 >> subtilex;
-                        int paletteidx = (*tiledata) & mask ? 1 : 0;
-                        paletteidx += *(tiledata+1) & mask ? 2 : 0;
-
-                        int color = (palette >> (paletteidx * 2)) & 0x3;
-                        screen[x+REG_LY*160] = palette_colors[color];
+                        uint8_t vx = x + REG_SCX, vy = REG_LY + REG_SCY;
+                        screen[x+REG_LY*160] = get_tile_pixel(vx>>3, vx&0x7, vy>>3, vy&0x7, tilemap, REG_BGP);
                     }
                 }
 
                 // Draw window if enabled, in front of bg and overlaps this scanline
                 if((REG_LCDC & 0x20) && (REG_LCDC & 0x1) && (REG_WY <= REG_LY) && (REG_WX <= 166)) {
-                    //uint8_t win_y = REG_LY - REG_WY;
                     uint8_t* tilemap = (REG_LCDC & 0x40) ? (map + 0x9C00) : (map + 0x9800);
-                    uint8_t palette = REG_BGP;
                     for(int win_x = 0; win_x < 160; ++win_x)
                     {
                         if(win_x + REG_WX < 7) continue; // before screen
                         int x = win_x + REG_WX - 7;
                         if(x >= 160) break;
-                        int tilex = win_x >> 3, subtilex = win_x & 0x7;
-                        int tiley = lcd_window_line >> 3, subtiley = lcd_window_line & 0x7;
-                        uint8_t tileidx = tilemap[tilex+tiley*32];
-                        uint8_t *tiledata = (REG_LCDC & 0x10) ? (map + 0x8000 + tileidx*16) : (map + 0x9000 + ((int8_t)tileidx)*16);
-                        tiledata += subtiley*2; // row
-
-                        uint8_t mask = 0x80 >> subtilex;
-                        int paletteidx = (*tiledata) & mask ? 1 : 0;
-                        paletteidx += *(tiledata+1) & mask ? 2 : 0;
-
-                        int color = (palette >> (paletteidx * 2)) & 0x3;
-                        screen[x+REG_LY*160] = palette_colors[color];
+                        screen[x+REG_LY*160] = get_tile_pixel(win_x>>3, win_x&0x7, lcd_window_line>>3, lcd_window_line&0x7, tilemap, REG_BGP);
                     }
                     lcd_window_line++;
                 }
