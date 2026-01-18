@@ -32,18 +32,8 @@ Output: `bin/ges`
 - **Right Shift**: Select
 - **ESC**: Quit
 
-## Features
-
-- CPU: Full Z80-like instruction set, interrupts, HALT bug
-- Memory: ROM banking (MBC1), VRAM, WRAM, I/O registers
-- Display: Background, window, sprites (8x8, 8x16), palettes
-- Audio: Square wave channels 1, 2, 4 (envelope, sweep, length)
-- Timers: DIV, TIMA with configurable clock
-- Input: Joypad emulation
-
 ## Limitations
 
 - MBC1 only (no MBC2, MBC3, MBC5)
 - No save RAM support
-- Sound channel 3 (wave) not implemented
 - Serial transfer not functional

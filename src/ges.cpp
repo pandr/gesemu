@@ -129,6 +129,12 @@ uint16_t sound_ch2_period_divider = 0;
 uint8_t sound_ch2_envelope_timer = 0;
 uint8_t sound_ch2_volume = 0;
 
+// Sound channel 3 state
+bool sound_ch3_length_enable = false;
+uint8_t sound_ch3_length_timer = 0;
+uint16_t sound_ch3_period_divider = 0;
+uint8_t sound_ch3_volume = 0;
+
 // Sound channel 4 state
 bool sound_ch4_length_enable = false;
 uint8_t sound_ch4_length_timer = 0;
@@ -440,9 +446,19 @@ void write(uint16_t addr, uint8_t value)
             map[addr] = value;
         }
         else if (addr == 0xFF1E) {
-            log_v_printf("Sound period high %02x\n", value);
-            value |= 0x34;
+            log_v_printf("NR34: Sound period high %02x\n", value);
+            value |= 0x38;
             map[addr] = value;
+            if(value & 0x80) {
+                log_v_printf("  -> Triggering sound on chan 3\n");
+                REG_NR52 |= 0x4; // turn on chan 3
+                sound_ch3_length_enable = (value & 0x40);
+                if(sound_ch3_length_enable) {
+                    sound_ch3_length_timer = REG_NR31;
+                }
+                sound_ch3_period_divider = REG_NR33 | ((REG_NR34 & 0x7)<<8);
+                sound_ch3_volume = (REG_NR32 >> 5) & 0x3;
+            }
         }
         else if (addr == 0xFF20) {
             log_v_printf("NR41 Sound length %02x\n", value);
@@ -462,7 +478,7 @@ void write(uint16_t addr, uint8_t value)
             value |= 0x3F;
             if(value & 0x80) {
                 log_v_printf("  -> Triggering sound on chan 4\n");
-                REG_NR52 |= 0x4; // turn on chan 4
+                REG_NR52 |= 0x8; // turn on chan 4
                 sound_ch4_length_enable = (value & 0x40);
                 if(sound_ch4_length_enable) {
                     sound_ch4_length_timer = REG_NR41 & 0x3F;
@@ -482,6 +498,7 @@ void write(uint16_t addr, uint8_t value)
             map[addr] = value;
         }
         else if (addr >= 0xFF30 && addr <= 0xFF3F) {
+            log_v_printf("Wave pattern %04x : %02x\n", addr, value);
             map[addr] = value;
         }
         else if (addr == 0xFF40) {
@@ -577,7 +594,7 @@ const int OP_T_STATES[] = {
         12,12,8, 4, 0,16, 8,16,12, 8,16, 4, 0, 0, 8,16  /* 0xF0 */
 };
 
-static inline void render_square_channel(float* fstream, int len, uint8_t ch_enable_mask, uint8_t pan_left_mask, uint8_t pan_right_mask, uint8_t duty_reg, uint16_t period_divider, uint8_t volume, float* phase, bool add_to_stream)
+static inline void render_square_channel(float* fstream, int len, uint8_t ch_enable_mask, uint8_t pan_left_mask, uint8_t pan_right_mask, uint8_t duty_reg, uint16_t period_divider, uint8_t volume, float* phase)
 {
     static const uint8_t duty_masks[] = { 0x7F, 0x7E, 0x1E, 0x81 };
     float vol = (REG_NR52 & 0x80) && (REG_NR52 & ch_enable_mask) ? 1.0f : 0.0f;
@@ -593,15 +610,10 @@ static inline void render_square_channel(float* fstream, int len, uint8_t ch_ena
         float s = low ? -0.25f : 0.25f;
         float l = s*vol*panleft;
         float r = s*vol*panright;
-        if(add_to_stream) {
-            fstream[i]   += l;
-            fstream[i+1] += r;
-        } else {
-            fstream[i]   = l;
-            fstream[i+1] = r;
-        }
+        fstream[i]   += l;
+        fstream[i+1] += r;
         *phase = *phase + rate / 48000.0f;
-        while(*phase > 8.0f) *phase -= 8.0f;
+        while(*phase >= 8.0f) *phase -= 8.0f;
     }
 }
 
@@ -610,20 +622,42 @@ void audio_callback(void* /*userdata*/, Uint8* stream, int len)
 {
     static float ch1_phase = 0;
     static float ch2_phase = 0;
+    static float ch3_phase = 0;
     static float ch4_phase = 0;
     float* fstream = (float*)stream;
 
-    // CH1
-    render_square_channel(fstream, len, 0x01, 0x10, 0x01, REG_NR11, sound_ch1_period_divider, sound_ch1_volume, &ch1_phase, false);
+    memset(fstream, 0, len); // clear to 0.0 so we can add channel contributions
 
-    // CH2
-    render_square_channel(fstream, len, 0x02, 0x20, 0x02, REG_NR21, sound_ch2_period_divider, sound_ch2_volume, &ch2_phase, true);   
+    // CH1 - square with envelope and frequency sweep
+    render_square_channel(fstream, len, 0x01, 0x10, 0x01, REG_NR11, sound_ch1_period_divider, sound_ch1_volume, &ch1_phase);
 
-    // CH4
-    float ch4_vol = (REG_NR52 & 0x80) && (REG_NR52 & 0x04) ? 1.0f : 0.0f;
+    // CH2 - square with envelope
+    render_square_channel(fstream, len, 0x02, 0x20, 0x02, REG_NR21, sound_ch2_period_divider, sound_ch2_volume, &ch2_phase);   
+
+    // CH3 - waveform
+    float ch3_volume = (REG_NR52 & 0x80) && (REG_NR52 & 0x04) ? 1.0f : 0.0f;
+    float ch3_panleft = (REG_NR51 & 0x40) ? 1.0f : 0.0f;
+    float ch3_panright = (REG_NR51 & 0x04) ? 1.0f : 0.0f;
+    float ch3_rate = 2097152.0f / (2048 - sound_ch3_period_divider);
+    for(int i = 0, c = len/4; i < c; i+=2) {
+        uint8_t iphase = (uint8_t)ch3_phase & 0x1F;
+        uint8_t sample = read(0xFF30+(iphase >> 1));
+        sample = (iphase & 0) ? sample >> 4 : sample & 0x0F; // Upper nibble first
+        //sample = iphase < 16 ? 0 : 0xF;
+        float s = 0.5f * sample / 15.0f - 0.25f; //  -0.25f - 0.25f
+        static const float volume[] = {0.0f, 1.0f, 0.5f, 0.25f};
+        s *= ch3_volume * volume[sound_ch3_volume];
+        fstream[i]   += s * ch3_panleft;
+        fstream[i+1] += s * ch3_panright;
+        ch3_phase += ch3_rate / 48000.0f;
+        while (ch3_phase >= 32.0f) ch3_phase -= 32.0f;
+    }
+
+    // CH4 - noise
+    float ch4_vol = (REG_NR52 & 0x80) && (REG_NR52 & 0x08) ? 1.0f : 0.0f;
     ch4_vol *= sound_ch4_volume / 15.0f;
-    float ch4_panleft = (REG_NR51 & 0x40) ? 1.0f : 0.0f;
-    float ch4_panright = (REG_NR51 & 0x04) ? 1.0f : 0.0f;
+    float ch4_panleft = (REG_NR51 & 0x80) ? 1.0f : 0.0f;
+    float ch4_panright = (REG_NR51 & 0x08) ? 1.0f : 0.0f;
 
     float ch4_rate = 262144.0f / (REG_NR43 & 0x7 ? REG_NR43 & 0x7 : 0.5f);
     ch4_rate /= (1 << (REG_NR43 >> 4));
@@ -1488,11 +1522,21 @@ int main(int argc, char* argv[]) {
                 }
 
                 if(REG_NR52 & 0x4) {
+                    // Channel 3 length timer
+                    if(sound_ch3_length_enable && (div_apu & 0x1) == 0) {
+                        sound_ch3_length_timer++;
+                        if(sound_ch3_length_timer == 0) {
+                            REG_NR52 &= ~0x4;
+                        }
+                    }
+                }
+
+                if(REG_NR52 & 0x8) {
                     // Channel 4 length timer
                     if(sound_ch4_length_enable && (div_apu & 0x1) == 0) {
                         sound_ch4_length_timer++;
                         if(sound_ch4_length_timer == 0x40) {
-                            REG_NR52 &= ~0x4; // disable chan 4
+                            REG_NR52 &= ~0x8; // disable chan 4
                         }
                     }   
 
