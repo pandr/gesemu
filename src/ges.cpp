@@ -58,6 +58,7 @@ int LCD_CYCLES_PER_SCANLINE = 456;
 
 // Virtual LCD display. 160 x 144 pixels, each 3 bytes for rgb
 uint32_t screen[160*144] = {};
+static const uint32_t palette_colors[4] = {0x00000000, 0xFFAAAAAA, 0xFF555555, 0xFF000000};
 
 // IO Registers
 uint8_t& REG_JOYP  = map[0xFF00];
@@ -1664,10 +1665,7 @@ int main(int argc, char* argv[]) {
                         paletteidx += *(tiledata+1) & mask ? 2 : 0;
 
                         int color = (palette >> (paletteidx * 2)) & 0x3;
-                        screen[x+REG_LY*160] = color == 0 ? 0x00000000 :
-                                               color == 1 ? 0xFFAAAAAA :
-                                               color == 2 ? 0xFF555555 :
-                                                            0xFF000000;
+                        screen[x+REG_LY*160] = palette_colors[color];
                     }
                 }
 
@@ -1692,10 +1690,7 @@ int main(int argc, char* argv[]) {
                         paletteidx += *(tiledata+1) & mask ? 2 : 0;
 
                         int color = (palette >> (paletteidx * 2)) & 0x3;
-                        screen[x+REG_LY*160] = color == 0 ? 0x00000000 :
-                                               color == 1 ? 0xFFAAAAAA :
-                                               color == 2 ? 0xFF555555 :
-                                                            0xFF000000;
+                        screen[x+REG_LY*160] = palette_colors[color];
                     }
                     lcd_window_line++;
                 }
@@ -1771,10 +1766,7 @@ int main(int argc, char* argv[]) {
                                 if(bg_pixel != 0x00000000)
                                     continue;
                             }
-                            screen[screen_x + REG_LY * 160] = color == 0 ? 0x00000000 :
-                                                              color == 1 ? 0xFFAAAAAA :
-                                                              color == 2 ? 0xFF555555 :
-                                                                           0xFF000000;
+                            screen[screen_x + REG_LY * 160] = palette_colors[color];
                         }
                     }
                 }
