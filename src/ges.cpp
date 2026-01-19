@@ -688,7 +688,10 @@ void audio_callback(void* /*userdata*/, Uint8* stream, int len)
 uint32_t disassemble = 0;
 #define OPCODE(x) {if(disassemble>0){disassemble--; printf("(%04x) %04x: %02x %s\n", sys_counter, PC-1, op, x);}}
 
-static uint16_t break_at = 0xFFFF;
+uint16_t break_at = 0xFFFF;
+bool show_profile_bar = false;
+uint32_t profile_bar[160] = {};
+
 int cpu_tick()
 {
     if(ime_true_pending > 0) {
@@ -1396,12 +1399,12 @@ int main(int argc, char* argv[]) {
 
             if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
                 running = false;
-                continue;
             }
 
-            if (event.type != SDL_KEYDOWN && event.type != SDL_KEYUP)
-                continue;
-
+            if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_0)
+                show_profile_bar = true;
+            else if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_0)
+                show_profile_bar = false;
         }
 
         // Run cpu
@@ -1729,6 +1732,8 @@ int main(int argc, char* argv[]) {
             cycles_left -= cycles;
         }
 
+        uint64_t frame_mid = SDL_GetPerformanceCounter();
+
         // Clear screen
         SDL_SetRenderDrawColor(renderer, 200, 220, 200, 255);
         SDL_RenderClear(renderer);
@@ -1739,6 +1744,7 @@ int main(int argc, char* argv[]) {
             for(int y = 0; y < 144; ++y)
             {
                 uint32_t col = screen[x+y*160];
+                if(y==0 && show_profile_bar) col = profile_bar[x];
                 uint8_t r = col>>16;
                 uint8_t g = col>>8;
                 uint8_t b = col;
@@ -1762,6 +1768,11 @@ int main(int argc, char* argv[]) {
         if(frame_target > 0) {
             uint64_t ms = frame_target * 1000 / timer_freq;
             if(ms > 20) ms = 20;
+            uint64_t frame_cpu = frame_mid - frame_start;
+            for(int i = 0; i < 160; ++i) {
+                uint64_t tick_bar = i * target_duration / 160;
+                profile_bar[i] = tick_bar <= frame_cpu ? 0xFF00FF00 : tick_bar <= frame_duration ? 0xFFFF0000 : 0xFF000000;
+            }
             SDL_Delay(ms);
         }
 
