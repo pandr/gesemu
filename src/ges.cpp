@@ -38,26 +38,26 @@ uint8_t mbc_ram_size_info = 0;
 uint8_t mbc_ram_banks = 0;
 
 // Flag masks
-#define Fz_mask (1<<7)
-#define Fn_mask (1<<6)
-#define Fh_mask (1<<5)
-#define Fc_mask (1<<4)
-#define Fz ((F&Fz_mask) >> 7)
-#define Fn ((F&Fn_mask) >> 6)
-#define Fh ((F&Fh_mask) >> 5)
-#define Fc ((F&Fc_mask) >> 4)
+#define Fz_mask (1 << 7)
+#define Fn_mask (1 << 6)
+#define Fh_mask (1 << 5)
+#define Fc_mask (1 << 4)
+#define Fz ((F & Fz_mask) >> 7)
+#define Fn ((F & Fn_mask) >> 6)
+#define Fh ((F & Fh_mask) >> 5)
+#define Fc ((F & Fc_mask) >> 4)
 
 
 // Constants
 int CYCLES_PR_FRAME = 69905; // close to spec 4194304 cyc/sec at 60hz
-int SCREENSCALE = 4;
+int SCREENSCALE = 2;
 int LCD_SCANLINES = 154;
 int LCD_HEIGHT = 144;
 int LCD_WIDTH = 160;
 int LCD_CYCLES_PER_SCANLINE = 456;
 
 // Virtual LCD display. 160 x 144 pixels, each 3 bytes for rgb
-uint32_t screen[160*144] = {};
+uint32_t screen[160 * 144] = {};
 static const uint32_t palette_colors[4] = {0x00000000, 0xFFAAAAAA, 0xFF555555, 0xFF000000};
 
 // IO Registers
@@ -183,7 +183,7 @@ void post_boot_teleport()
         {0xff40,0x91}, {0xff41,0x85}, {0xff42,0x00}, {0xff43,0x00}, {0xff44,0x00}, {0xff45,0x00}, {0xff46,0xff},
         {0xff47,0xfc}, {0xff48,0xff}, {0xff49,0xff}, {0xff4a,0x00}, {0xff4b,0x00}, {0xffff,0x00}
     };
-    for(size_t i = 0; i < sizeof(io_init)/sizeof(io_init[0]); i++)
+    for(size_t i = 0; i < sizeof(io_init) / sizeof(io_init[0]); i++)
         map[io_init[i].addr] = io_init[i].val;
 }
 
@@ -195,7 +195,7 @@ uint8_t read(uint16_t addr)
     }
     else if (addr <= 0x7FFF) {
         uint8_t bank_mask = mbc_rom_banks - 1;
-        uint32_t bank_base = (mbc_rom_bank&bank_mask)*0x4000;
+        uint32_t bank_base = (mbc_rom_bank & bank_mask) * 0x4000;
         return rom[bank_base + addr - 0x4000];
     }
     // VRAM
@@ -208,7 +208,7 @@ uint8_t read(uint16_t addr)
             uint8_t bank = 0;
             if(mbc_banking_mode == 1)
                 bank = mbc_ram_bank;
-            return ram[addr - 0xA000 + bank*0x2000];
+            return ram[addr - 0xA000 + bank * 0x2000];
         }
         else {
             printf("Trying to read from disabled ram at addr %04x\n", addr);
@@ -283,7 +283,7 @@ void write(uint16_t addr, uint8_t value)
             uint8_t bank = 0;
             if(mbc_banking_mode == 1)
                 bank = mbc_ram_bank;
-            ram[addr - 0xA000 + bank*0x2000] = value;
+            ram[addr - 0xA000 + bank * 0x2000] = value;
         }
         else {
             printf("Trying to write to disabled ram at addr %04x\n", addr);
@@ -350,8 +350,8 @@ void write(uint16_t addr, uint8_t value)
             map[addr] = value;
         }
         else if(addr == 0xFF26) {
-            log_v_printf("Turning sound %s. %02x\n", value&0x80 ? "On": "Off", value);
-            map[addr] = (map[addr] & 0x7F) | (value&0x80);
+            log_v_printf("Turning sound %s. %02x\n", value & 0x80 ? "On": "Off", value);
+            map[addr] = (map[addr] & 0x7F) | (value & 0x80);
         }
         else if (addr == 0xFF0F) {
             log_v_printf("IF: %02x\n", value);
@@ -388,7 +388,7 @@ void write(uint16_t addr, uint8_t value)
                 if(sound_ch1_length_enable) {
                     sound_ch1_length_timer = (REG_NR11 & 0x3F);
                 }
-                sound_ch1_period_divider = REG_NR13 | ((REG_NR14 & 0x7)<<8);
+                sound_ch1_period_divider = REG_NR13 | ((REG_NR14 & 0x7) << 8);
                 sound_ch1_envelope_timer = 0;
                 sound_ch1_volume = REG_NR12 >> 4;
                 sound_ch1_frq_sweep_timer = 0;
@@ -422,7 +422,7 @@ void write(uint16_t addr, uint8_t value)
                 if(sound_ch2_length_enable && sound_ch2_length_timer == 0) {
                     sound_ch2_length_timer = REG_NR21 & 0x3F;
                 }
-                sound_ch2_period_divider = REG_NR23 | ((REG_NR24 & 0x7)<<8);
+                sound_ch2_period_divider = REG_NR23 | ((REG_NR24 & 0x7) << 8);
                 sound_ch2_envelope_timer = 0;
                 sound_ch2_volume = REG_NR22 >> 4;
             }
@@ -456,7 +456,7 @@ void write(uint16_t addr, uint8_t value)
                 if(sound_ch3_length_enable) {
                     sound_ch3_length_timer = REG_NR31;
                 }
-                sound_ch3_period_divider = REG_NR33 | ((REG_NR34 & 0x7)<<8);
+                sound_ch3_period_divider = REG_NR33 | ((REG_NR34 & 0x7) << 8);
                 sound_ch3_volume = (REG_NR32 >> 5) & 0x3;
             }
         }
@@ -604,14 +604,14 @@ static inline void render_square_channel(float* fstream, int len, uint8_t ch_ena
     uint8_t duty = duty_reg >> 6;
     float rate = 1048576.0f / (2048 - period_divider);
     uint8_t duty_mask = duty_masks[duty];
-    for(int i = 0, c = len/4; i < c; i+=2) {
+    for(int i = 0, c = len / 4; i < c; i += 2) {
         uint8_t iphase = (uint8_t)*phase & 0x0F;
         bool low = (1 << iphase) & duty_mask;
         float s = low ? -0.25f : 0.25f;
-        float l = s*vol*panleft;
-        float r = s*vol*panright;
+        float l = s * vol * panleft;
+        float r = s * vol * panright;
         fstream[i]   += l;
-        fstream[i+1] += r;
+        fstream[i + 1] += r;
         *phase = *phase + rate / 48000.0f;
         while(*phase >= 8.0f) *phase -= 8.0f;
     }
@@ -644,15 +644,15 @@ void audio_callback(void* /*userdata*/, Uint8* stream, int len)
     float ch3_panleft = (REG_NR51 & 0x40) ? 1.0f : 0.0f;
     float ch3_panright = (REG_NR51 & 0x04) ? 1.0f : 0.0f;
     float ch3_rate = 2097152.0f / (2048 - sound_ch3_period_divider);
-    for(int i = 0, c = len/4; i < c; i+=2) {
+    for(int i = 0, c = len / 4; i < c; i += 2) {
         uint8_t iphase = (uint8_t)ch3_phase & 0x1F;
-        uint8_t sample = read(0xFF30+(iphase >> 1));
+        uint8_t sample = read(0xFF30 + (iphase >> 1));
         sample = (iphase & 1) == 0 ? sample >> 4 : sample & 0x0F; // Upper nibble first
         float s = 0.5f * sample / 15.0f - 0.25f; //  -0.25f - 0.25f
         static const float volume[] = {0.0f, 1.0f, 0.5f, 0.25f};
         s *= ch3_volume * volume[sound_ch3_volume];
         fstream[i]   += s * ch3_panleft;
-        fstream[i+1] += s * ch3_panright;
+        fstream[i + 1] += s * ch3_panright;
         ch3_phase += ch3_rate / 48000.0f;
         while (ch3_phase >= 32.0f) ch3_phase -= 32.0f;
     }
@@ -665,12 +665,12 @@ void audio_callback(void* /*userdata*/, Uint8* stream, int len)
 
     float ch4_rate = 262144.0f / (REG_NR43 & 0x7 ? REG_NR43 & 0x7 : 0.5f);
     ch4_rate /= (1 << (REG_NR43 >> 4));
-    for(int i = 0, c = len/4; i < c; i+=2) {
+    for(int i = 0, c = len / 4; i < c; i += 2) {
         float s = (sound_ch4_lfsr & 0x1) ? -0.25f : 0.25f;
-        float l = s*ch4_vol*ch4_panleft;
-        float r = s*ch4_vol*ch4_panright;
+        float l = s * ch4_vol * ch4_panleft;
+        float r = s * ch4_vol * ch4_panright;
         fstream[i]   += l;
-        fstream[i+1] += r;
+        fstream[i + 1] += r;
         ch4_phase = ch4_phase + ch4_rate / 48000.0f;
         while(ch4_phase > 1.0f) {
             ch4_phase -= 1.0f;
@@ -686,10 +686,11 @@ void audio_callback(void* /*userdata*/, Uint8* stream, int len)
 }
 
 uint32_t disassemble = 0;
-#define OPCODE(x) {if(disassemble>0){disassemble--; printf("(%04x) %04x: %02x %s\n", sys_counter, PC-1, op, x);}}
+#define OPCODE(x) {if(disassemble > 0){disassemble--; printf("(%04x) %04x: %02x %s\n", sys_counter, PC - 1, op, x);}}
 
 uint16_t break_at = 0xFFFF;
 bool show_profile_bar = false;
+bool upscale = true;
 uint32_t profile_bar[160] = {};
 
 int cpu_tick()
@@ -724,9 +725,9 @@ int cpu_tick()
                 ime = false;
                 log_v_printf("IME set to false\n");
                 REG_IF &= ~(1<<i);
-                write(--SP, (PC>>8)&0xFF);
-                write(--SP, PC&0xFF);
-                PC = 0x40 + i*8;
+                write(--SP, (PC >> 8) & 0xFF);
+                write(--SP, PC & 0xFF);
+                PC = 0x40 + i * 8;
                 cycles += 20;
                 break;
             }
@@ -742,30 +743,30 @@ int cpu_tick()
     }
     else if ((op & 0xCF) == 0x1) {
         OPCODE("LD r16, imm16");
-        *R16[(op&0x30)>>4] = read(PC) + (read(PC+1)<<8);
-        PC+=2;
+        *R16[(op & 0x30) >> 4] = read(PC) + (read(PC + 1) << 8);
+        PC += 2;
     }
     else if ((op & 0xCF) == 0x2) {
         OPCODE("LD [r16mem], a");
-        uint16_t *reg = R16mem[(op&0x30)>>4];
+        uint16_t *reg = R16mem[(op & 0x30) >> 4];
         write(*reg, A);
-        if((op&0x30) == 0x20) HL++;
-        else if ((op&0x30) == 0x30) HL--;
+        if((op & 0x30) == 0x20) HL++;
+        else if ((op & 0x30) == 0x30) HL--;
     }
     else if ((op & 0xCF) == 0xA) {
         OPCODE("LD a, [r16mem]");
-        uint16_t *reg = R16mem[(op&0x30)>>4];
+        uint16_t *reg = R16mem[(op & 0x30) >> 4];
         A = read(*reg);
-        if((op&0x30) == 0x20) HL++;
-        else if ((op&0x30) == 0x30) HL--;
+        if((op & 0x30) == 0x20) HL++;
+        else if ((op & 0x30) == 0x30) HL--;
     }
     else if (op == 0x08) {
         OPCODE("LD [imm16], sp");
         uint16_t addr = read(PC);
-        addr |= read(PC+1)<<8;
-        PC+=2;
+        addr |= read(PC + 1) << 8;
+        PC += 2;
         write(addr, SP & 0xFF);
-        write(addr+1, SP >> 8);
+        write(addr + 1, SP >> 8);
     }
     else if (op == 0xC9) {
         OPCODE("RET");
@@ -774,7 +775,7 @@ int cpu_tick()
     }
     else if ((op & 0xE7) == 0xC0) {
         OPCODE("RET cond");
-        uint8_t cond = (op&0x18) >> 3;
+        uint8_t cond = (op & 0x18) >> 3;
         if( ((cond == 0) && !Fz) || // nz
             ((cond == 1) && Fz)  || // z
             ((cond == 2) && !Fc) || // nc
@@ -794,9 +795,9 @@ int cpu_tick()
     }
     else if ((op & 0xE7) == 0xC2) {
         OPCODE("JP cond, imm16");
-        uint8_t cond = (op&0x18) >> 3;
+        uint8_t cond = (op & 0x18) >> 3;
         uint16_t dst = read(PC++);
-        dst |= read(PC++)<<8;
+        dst |= read(PC++) << 8;
         if( ((cond == 0) && !Fz) || // nz
             ((cond == 1) && Fz)  || // z
             ((cond == 2) && !Fc) || // nc
@@ -809,7 +810,7 @@ int cpu_tick()
     else if (op == 0xC3) {
         OPCODE("JP imm16");
         uint16_t dst = read(PC++);
-        dst |= read(PC++)<<8;
+        dst |= read(PC++) << 8;
         PC = dst;
     }
     else if (op == 0xE9) {
@@ -818,9 +819,9 @@ int cpu_tick()
     }
     else if ((op & 0xE7) == 0xC4) {
         OPCODE("CALL cond, imm16");
-        uint8_t cond = (op&0x18) >> 3;
+        uint8_t cond = (op & 0x18) >> 3;
         uint16_t dst = read(PC++);
-        dst |= read(PC++)<<8;
+        dst |= read(PC++) << 8;
         if( ((cond == 0) && !Fz) || // nz
             ((cond == 1) && Fz)  || // z
             ((cond == 2) && !Fc) || // nc
@@ -835,7 +836,7 @@ int cpu_tick()
     else if (op == 0xCD) {
         OPCODE("CALL imm16");
         uint16_t dst = read(PC++);
-        dst |= read(PC++)<<8;
+        dst |= read(PC++) << 8;
         write(--SP, PC >> 8);
         write(--SP, PC & 0xFF);
         PC = dst;
@@ -869,7 +870,7 @@ int cpu_tick()
     }
     else if ((op & 0xE7) == 0x20) {
         OPCODE("JR cond");
-        uint8_t cond = (op&0x18) >> 3;
+        uint8_t cond = (op & 0x18) >> 3;
         uint8_t off = read(PC++);
         if( ((cond == 0) && !Fz) || // nz
             ((cond == 1) && Fz)  || // z
@@ -892,7 +893,7 @@ int cpu_tick()
         OPCODE("LD r8, r8");
         if(op == 0x76) {
             OPCODE("HALT");
-            log_v_printf("HALT encountered at PC=%04x\n", PC-1);
+            log_v_printf("HALT encountered at PC=%04x\n", PC - 1);
             bool ipending = (map[0xFF0F] & map[0xFFFF] & 0x1F) != 0;
             if(!ime && ipending) {
                 log_v_printf("HALT bug triggered! PC set back to %04x\n", PC);
@@ -913,17 +914,17 @@ int cpu_tick()
     }
     else if (op == 0xE2) {
         OPCODE("LDH [c], a");
-        write(0xFF00+C, A);
+        write(0xFF00 + C, A);
     }    
     else if (op == 0xE0) {
         OPCODE("LDH [imm8], a");
-        write(0xFF00+read(PC), A);
+        write(0xFF00 + read(PC), A);
         PC++;
     }    
     else if (op == 0xEA) {
         OPCODE("LD [imm16], a");
-        write(read(PC) + (read(PC+1)<<8), A);
-        PC+=2;
+        write(read(PC) + (read(PC + 1) << 8), A);
+        PC += 2;
     }    
     else if (op == 0xE8) {
         OPCODE("ADD sp, imm8");
@@ -934,11 +935,11 @@ int cpu_tick()
     }    
     else if (op == 0xF2) {
         OPCODE("LDH a, [c]");
-        A = read(0xFF00+C);
+        A = read(0xFF00 + C);
     }    
     else if (op == 0xF0) {
         OPCODE("LDH a, [imm8]");
-        A = read(0xFF00+read(PC));
+        A = read(0xFF00 + read(PC));
         PC++;
     }    
     else if (op == 0xF8) {
@@ -954,8 +955,8 @@ int cpu_tick()
     }    
     else if (op == 0xFA) {
         OPCODE("LD a, [imm16]");
-        A = read(read(PC) + (read(PC+1)<<8));
-        PC+=2;
+        A = read(read(PC) + (read(PC + 1) << 8));
+        PC += 2;
     }    
     else if ((op & 0xCF) == 0x3) {
         OPCODE("INC r16");
@@ -979,7 +980,7 @@ int cpu_tick()
         uint8_t *reg = R8[op>>3];
         uint8_t v = reg ? *reg : read(HL);
         v+=1;
-        F = (v==0?0x80:0) | ((v&0xF)==0?0x20:0) | (F&Fc_mask);
+        F = (v == 0 ? 0x80 : 0) | ((v & 0xF) == 0 ? 0x20 : 0) | (F & Fc_mask);
         if(reg)
             *reg = v;
         else
@@ -990,7 +991,7 @@ int cpu_tick()
         uint8_t *reg = R8[op>>3];
         uint8_t v = reg ? *reg : read(HL);
         v-=1;
-        F = (v==0?Fz_mask:0) | Fn_mask | ((v&0xF)==0xF?Fh_mask:0) | (F&Fc_mask);
+        F = (v == 0 ? Fz_mask : 0) | Fn_mask | ((v & 0xF) == 0xF ? Fh_mask : 0) | (F & Fc_mask);
         if(reg)
             *reg = v;
         else
@@ -1003,7 +1004,7 @@ int cpu_tick()
         cycles = 8; // Base cycles for CB ops
         // Extra cycles for (HL) ops
         if( (op&0x7) == 0x6) {
-            cycles = (op&0xC0) == 0x40 ? 12 : 16; // 0x40-0x7F : 12 cycles, others 16 cycles
+            cycles = (op & 0xC0) == 0x40 ? 12 : 16; // 0x40-0x7F : 12 cycles, others 16 cycles
         }
         uint8_t top = op >> 6;
         if(top) {
@@ -1039,42 +1040,42 @@ int cpu_tick()
             if(top == 0x0) {
                 OPCODE("RLC r8");
                 r = (v << 1) | (v >> 7);
-                F = (r==0?Fz_mask:0) | (v&0x80?Fc_mask:0);
+                F = (r == 0 ? Fz_mask : 0) | (v & 0x80 ? Fc_mask : 0);
             }
             else if (top == 0x1) {
                 OPCODE("RRC r8");
                 r = (v >> 1) | (v << 7);
-                F = (r==0?Fz_mask:0) | (v&1?Fc_mask:0);
+                F = (r == 0 ? Fz_mask : 0) | (v & 1 ? Fc_mask : 0);
             }
             else if (top == 0x2) {
                 OPCODE("RL r8");
                 r = (v << 1) | Fc;
-                F = (r==0?Fz_mask:0) | (v&0x80?Fc_mask:0);
+                F = (r == 0 ? Fz_mask : 0) | (v & 0x80 ? Fc_mask : 0);
             }
             else if (top == 0x3) {
                 OPCODE("RR r8");
                 r = (v >> 1) | (Fc << 7);
-                F = (r==0?Fz_mask:0) | (v&1?Fc_mask:0);
+                F = (r == 0 ? Fz_mask : 0) | (v & 1 ? Fc_mask : 0);
             }
             else if (top == 0x4) {
                 OPCODE("SLA r8");
                 r = (v << 1);
-                F = (r==0?Fz_mask:0) | (v&0x80?Fc_mask:0);
+                F = (r == 0 ? Fz_mask : 0) | (v & 0x80 ? Fc_mask : 0);
             }
             else if (top == 0x5) {
                 OPCODE("SRA r8");
                 r = (v >> 1) | (v & 0x80);
-                F = (r==0?Fz_mask:0) | (v&1?Fc_mask:0);
+                F = (r == 0 ? Fz_mask : 0) | (v & 1 ? Fc_mask : 0);
             }
             else if (top == 0x6) {
                 OPCODE("SWAP r8");
-                r = (v>>4) | (v<<4);
-                F = (r==0?Fz_mask:0);
+                r = (v >> 4) | (v << 4);
+                F = (r == 0 ? Fz_mask : 0);
             }
             else if (top == 0x7) {
                 OPCODE("SRL r8");
                 r = v >> 1;
-                F = (r==0?Fz_mask:0) | (v&1?Fc_mask:0);
+                F = (r == 0 ? Fz_mask : 0) | (v & 1 ? Fc_mask : 0);
             }
             if (reg)
                 *reg = r;
@@ -1089,77 +1090,77 @@ int cpu_tick()
         // If reg is null we either have [HL] case or imm8 case
         uint8_t v = 0;
         if(reg) v=*reg; 
-        else if (op&0x40) v = read(PC++);
+        else if (op & 0x40) v = read(PC++);
         else v = read(HL);
 
-        uint32_t o = (op&0x38)>>3;
+        uint32_t o = (op & 0x38) >> 3;
         uint32_t r = 0;
-        if(o==0x0) {
+        if(o == 0x0) {
             OPCODE("ADD");
             r = A + v;
             //  Z                      N   H                         C
-            F = ((r&0xFF)==0?0x80:0) | 0 | (((A ^ v ^ r)&0x10)<<1) | ((r&0xFF00)?0x10:0);
+            F = ((r & 0xFF) == 0 ? 0x80 : 0) | 0 | (((A ^ v ^ r) & 0x10) << 1) | ((r & 0xFF00) ? 0x10 : 0);
             A = r & 0xFF;
         }
         else if (o == 0x1) {
             OPCODE("ADC");
             r = A + v + Fc;
-            F = ((r&0xFF)==0?0x80:0) | 0 | (((A ^ v ^ r)&0x10)<<1) | ((r&0xFF00)?0x10:0);
+            F = ((r & 0xFF) == 0 ? 0x80 : 0) | 0 | (((A ^ v ^ r) & 0x10) << 1) | ((r & 0xFF00) ? 0x10 : 0);
             A = r & 0xFF;
         }
         else if (o == 0x2) {
             OPCODE("SUB");
             r = A - v;
-            F = ((r&0xFF)==0?0x80:0) | Fn_mask | (((A ^ v ^ r)&0x10)<<1) | ((r&0xFF00)?0x10:0);
+            F = ((r & 0xFF) == 0 ? 0x80 : 0) | Fn_mask | (((A ^ v ^ r) & 0x10) << 1) | ((r & 0xFF00) ? 0x10 : 0);
             A = r & 0xFF;
         }
         else if (o == 0x3) {
             OPCODE("SBC");
             r = A - v - Fc;
-            F = ((r&0xFF)==0?0x80:0) | Fn_mask | (((A ^ v ^ r)&0x10)<<1) | ((r&0xFF00)?0x10:0);
+            F = ((r & 0xFF) == 0 ? 0x80 : 0) | Fn_mask | (((A ^ v ^ r) & 0x10) << 1) | ((r & 0xFF00) ? 0x10 : 0);
             A = r & 0xFF;
         }
         else if (o == 0x4) {
             OPCODE("AND");
             A = A & v;
-            F = (A==0?0x80:0) | 0 | 0x20 | 0;
+            F = (A == 0 ? 0x80 : 0) | 0 | 0x20 | 0;
         }
         else if (o == 0x5) {
             OPCODE("XOR");
             A = A ^ v;
-            F = (A==0?0x80:0) | 0 | 0 | 0;
+            F = (A == 0 ? 0x80 : 0) | 0 | 0 | 0;
         }
         else if (o == 0x6) {
             OPCODE("OR");
             A = A | v;
-            F = (A==0?0x80:0) | 0 | 0 | 0;
+            F = (A == 0 ? 0x80 : 0) | 0 | 0 | 0;
         }
         else if (o == 0x7) {
             OPCODE("CP");
             r = A - v;
-            F = ((r&0xFF)==0?0x80:0) | Fn_mask | (((A ^ v ^ r)&0x10)<<1) | ((r&0xFF00)?0x10:0);
+            F = ((r & 0xFF) == 0 ? 0x80 : 0) | Fn_mask | (((A ^ v ^ r) & 0x10) << 1) | ((r & 0xFF00) ? 0x10 : 0);
         }
     }
     else if (op == 0x07) {
         OPCODE("RLCA");
-        A = (A<<1) | (A >> 7);
-        F = A&1 ? Fc_mask : 0;
+        A = (A << 1) | (A >> 7);
+        F = A & 1 ? Fc_mask : 0;
     }
     else if (op == 0x0F) {
         OPCODE("RRCA");
         A = (A >> 1) | (A << 7);
-        F = A&0x80 ? Fc_mask : 0;
+        F = A & 0x80 ? Fc_mask : 0;
     }
     else if (op == 0x17) {
         OPCODE("RLA");
-        uint8_t r = (A<<1) | Fc;
-        F = A&0x80 ? Fc_mask : 0;
+        uint8_t r = (A << 1) | Fc;
+        F = A & 0x80 ? Fc_mask : 0;
         A = r;
     }
     else if (op == 0x1F) {
         OPCODE("RRA");
-        uint8_t r = (A>>1) | (Fc<<7);
-        F = A&1 ? Fc_mask : 0;
+        uint8_t r = (A >> 1) | (Fc << 7);
+        F = A & 1 ? Fc_mask : 0;
         A = r;
     }
     else if (op == 0x27) {
@@ -1176,7 +1177,7 @@ int cpu_tick()
             A += adj;
         }
         F &= ~(Fz_mask | Fh_mask);
-        F |= (A==0?Fz_mask:0);
+        F |= (A == 0 ? Fz_mask : 0);
     }
     else if (op == 0x2F) {
         OPCODE("CPL");
@@ -1235,11 +1236,11 @@ void load_rom(uint8_t* dst, uint32_t size, const char* filename)
 
 static inline uint32_t get_tile_pixel(int tilex, int subtilex, int tiley, int subtiley, uint8_t* tilemap, uint8_t palette)
 {
-    uint8_t tileidx = tilemap[tilex+tiley*32];
-    uint8_t *tiledata = (REG_LCDC & 0x10) ? (map + 0x8000 + tileidx*16) : (map + 0x9000 + ((int8_t)tileidx)*16);
-    tiledata += subtiley*2;
+    uint8_t tileidx = tilemap[tilex + tiley * 32];
+    uint8_t *tiledata = (REG_LCDC & 0x10) ? (map + 0x8000 + tileidx * 16) : (map + 0x9000 + ((int8_t)tileidx) * 16);
+    tiledata += subtiley * 2;
     uint8_t mask = 0x80 >> subtilex;
-    int paletteidx = (*tiledata & mask ? 1 : 0) + (*(tiledata+1) & mask ? 2 : 0);
+    int paletteidx = (*tiledata & mask ? 1 : 0) + (*(tiledata + 1) & mask ? 2 : 0);
     return palette_colors[(palette >> (paletteidx * 2)) & 0x3];
 }
 
@@ -1281,7 +1282,8 @@ int main(int argc, char* argv[]) {
         "Ges emulator",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
-        160*SCREENSCALE, 144*SCREENSCALE,
+        //160*SCREENSCALE, 144*SCREENSCALE,
+        240 * SCREENSCALE, 320 * SCREENSCALE,
         SDL_WINDOW_SHOWN | SDL_WINDOW_INPUT_FOCUS
     );
 
@@ -1343,7 +1345,7 @@ int main(int argc, char* argv[]) {
         printf("MBC type id: %02x\n", mbc_type_id);
         printf("MBC type: %02x\n", mbc_type);
         printf("MBC rom size: %02x (%02x banks)\n", mbc_rom_size_info, mbc_rom_banks);
-        printf("MBC ram size: %02x (%02x banks)\n", mbc_ram_banks*1024*8, mbc_ram_banks);
+        printf("MBC ram size: %02x (%02x banks)\n", mbc_ram_banks * 1024 * 8, mbc_ram_banks);
     }
     if(boot_rom_file) {
         printf("Loading boot-rom %s\n", boot_rom_file);
@@ -1405,6 +1407,9 @@ int main(int argc, char* argv[]) {
                 show_profile_bar = true;
             else if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_0)
                 show_profile_bar = false;
+            
+            if(event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_9)
+                upscale = !upscale;
         }
 
         // Run cpu
@@ -1577,7 +1582,7 @@ int main(int argc, char* argv[]) {
                 }
 
                 // Update stat for LYC match and trigger LYC=LY interrupt if enabled
-                if(REG_LYC==REG_LY) {
+                if(REG_LYC == REG_LY) {
                     REG_STAT |= 4;
                     // Fire interrupt if enabled
                     if (REG_STAT & 0x40) {
@@ -1635,7 +1640,7 @@ int main(int argc, char* argv[]) {
                     for(int x = 0; x < 160; ++x)
                     {
                         uint8_t vx = x + REG_SCX, vy = REG_LY + REG_SCY;
-                        screen[x+REG_LY*160] = get_tile_pixel(vx>>3, vx&0x7, vy>>3, vy&0x7, tilemap, REG_BGP);
+                        screen[x + REG_LY * 160] = get_tile_pixel(vx >> 3, vx & 0x7, vy >> 3, vy & 0x7, tilemap, REG_BGP);
                     }
                 }
 
@@ -1647,7 +1652,7 @@ int main(int argc, char* argv[]) {
                         if(win_x + REG_WX < 7) continue; // before screen
                         int x = win_x + REG_WX - 7;
                         if(x >= 160) break;
-                        screen[x+REG_LY*160] = get_tile_pixel(win_x>>3, win_x&0x7, lcd_window_line>>3, lcd_window_line&0x7, tilemap, REG_BGP);
+                        screen[x + REG_LY * 160] = get_tile_pixel(win_x >> 3, win_x & 0x7, lcd_window_line >> 3, lcd_window_line & 0x7, tilemap, REG_BGP);
                     }
                     lcd_window_line++;
                 }
@@ -1672,8 +1677,8 @@ int main(int argc, char* argv[]) {
                         if(REG_LY + 16 >= sprite_y && REG_LY + 16 < sprite_y + sprite_height) {
                             uint16_t sprite_to_add = (sprite_x << 8) | i;
                             int place = spritecount;
-                            while(place > 0 && sprites_on_line[place-1] <= sprite_to_add) {
-                                sprites_on_line[place] = sprites_on_line[place-1];
+                            while(place > 0 && sprites_on_line[place - 1] <= sprite_to_add) {
+                                sprites_on_line[place] = sprites_on_line[place - 1];
                                 place--;
                             }
                             sprites_on_line[place] = sprite_to_add;
@@ -1689,7 +1694,7 @@ int main(int argc, char* argv[]) {
                         uint8_t sprite_index = sprites_on_line[s] & 0xFF;
                         uint8_t* oam_entry = map + 0xFE00 + sprite_index * 4;
                         uint8_t sprite_y = *(oam_entry);     // Y position on screen + 16
-                        uint8_t sprite_tile = *(oam_entry+2); // Tile index
+                        uint8_t sprite_tile = *(oam_entry + 2); // Tile index
                         if(sprite_height == 16)
                             sprite_tile &= 0xFE; // force even tile number for 8x16 sprites
                         uint8_t sprite_attr = *(oam_entry+3); // Attributes
@@ -1735,23 +1740,57 @@ int main(int argc, char* argv[]) {
         uint64_t frame_mid = SDL_GetPerformanceCounter();
 
         // Clear screen
+        uint32_t clearcol = (200<<16)+(220<<8)+200;
         SDL_SetRenderDrawColor(renderer, 200, 220, 200, 255);
         SDL_RenderClear(renderer);
 
         // Draw screen
-        for(int x = 0; x < 160; ++x)
+        if(upscale)
         {
-            for(int y = 0; y < 144; ++y)
+            // Upscale 1.5 to hit 240 width
+            for(int x = 0; x < 240; ++x)
             {
-                uint32_t col = screen[x+y*160];
-                if(y==0 && show_profile_bar) col = profile_bar[x];
-                uint8_t r = col>>16;
-                uint8_t g = col>>8;
-                uint8_t b = col;
-                if(col>0) {
-                    SDL_SetRenderDrawColor(renderer, r, g, b, 255);
-                    SDL_Rect rect = {x*SCREENSCALE, y*SCREENSCALE, SCREENSCALE, SCREENSCALE};
-                    SDL_RenderFillRect(renderer, &rect);
+                for(int y = 0; y < 216; ++y)
+                {
+                    uint32_t sx = x * 2 / 3;
+                    uint32_t sx2 = (x * 2 + 1) / 3;
+                    uint32_t sy = y * 2 / 3;
+                    uint32_t sy2 = (y * 2 + 1) / 3;
+                    uint32_t col = screen[sx + sy * 160]; if(!(col & 0xFF000000)) col = clearcol;
+                    uint32_t col1 = screen[sx2 + sy * 160];if(!(col1 & 0xFF000000)) col1 = clearcol;
+                    uint32_t col2 = screen[sx + sy2 * 160];if(!(col2 & 0xFF000000)) col2 = clearcol;
+                    uint32_t col3 = screen[sx2 + sy2 * 160];if(!(col3 & 0xFF000000)) col3 = clearcol;
+                    if(y == 0 && show_profile_bar) col = profile_bar[x],col1=0,col2=0,col3=0;
+                    uint16_t r = ((col >> 16) & 0xff) + ((col1 >> 16) & 0xff) + ((col2 >> 16) & 0xff) + ((col3 >> 16) & 0xff);
+                    uint16_t g = ((col >> 8) & 0xff) + ((col1 >> 8) & 0xff) + ((col2 >> 8) & 0xff) + ((col3 >> 8) & 0xff);
+                    uint16_t b = (col & 0xff) + (col1 & 0xff) + (col2 & 0xff) + (col3 & 0xff);
+                    if(col || col1 || col2 || col3)
+                    {
+                        SDL_SetRenderDrawColor(renderer, r >> 2, g >> 2, b >> 2, 255);
+                        SDL_Rect rect = {x * SCREENSCALE, (52 + y) * SCREENSCALE, SCREENSCALE, SCREENSCALE};
+                        SDL_RenderFillRect(renderer, &rect);
+                    }
+                }
+            }
+        }
+        else
+        {
+            // No upscale, center on screen
+            for(int x = 0; x < 160; ++x)
+            {
+                for(int y = 0; y < 144; ++y)
+                {
+                    uint32_t col = screen[x + y * 160];
+                    if(y == 0 && show_profile_bar) col = profile_bar[x];
+                    uint8_t r = (col >> 16) & 0xff;
+                    uint8_t g = (col >> 8) & 0xFF;
+                    uint8_t b = (col & 0xff);
+                    if(col)
+                    {
+                        SDL_SetRenderDrawColor(renderer, r, g, b, 255);
+                        SDL_Rect rect = {(x + 40) * SCREENSCALE, (y + 88) * SCREENSCALE, SCREENSCALE, SCREENSCALE};
+                        SDL_RenderFillRect(renderer, &rect);
+                    }
                 }
             }
         }
