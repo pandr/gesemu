@@ -1,6 +1,8 @@
 # Ges - Game Boy Emulator
 
-A single-file Game Boy (DMG) emulator written in C++ using SDL2.
+A single-file Game Boy (DMG) emulator written in C++ (that looks like C) using SDL2.
+
+![Shot](images/screenshot.png)
 
 ## Building
 
